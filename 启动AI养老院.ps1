@@ -46,7 +46,7 @@ $env:PATH = "C:\Program Files\Docker\Docker\resources\bin;" + $env:PATH
 & $dockerPath info --format "{{.ServerVersion}}" | Out-Null
 & $dockerPath compose -f $infraCompose up -d | Out-Host
 
-foreach ($port in @(3306, 6379, 19530)) {
+foreach ($port in @(3308, 6379, 19530)) {
     for ($attempt = 0; $attempt -lt 60 -and -not (Test-TcpEndpoint $port); $attempt++) {
         Start-Sleep -Seconds 1
     }
