@@ -4,7 +4,6 @@
 
 # Local credentials and personal/sample records
 账号.txt
-数据库/db_beadhouse.sql
 .env
 .env.*
 !.env.example

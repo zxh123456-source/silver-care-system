@@ -1,6 +1,6 @@
 # 银龄智慧康护——养老院管理系统
 
-面向养老院日常运营的管理系统，包含 Vue 3 前端、Spring Boot 后端、FastAPI RAG 服务、MySQL、Redis 与 Milvus。项目已加入护理记录辅助、制度知识库、健康趋势、用药核对、每日护理助手、老人级数据权限、AI 审计和中文 OCR。
+面向养老院日常运营的管理系统，包含 Vue 3 前端、Spring Boot 后端和 FastAPI RAG 服务。MySQL、Redis、Milvus、etcd 与 MinIO 统一由 Docker Compose 运行，业务代码仍在本机运行。
 
 ## 项目结构
 
@@ -13,16 +13,18 @@
 
 ## 本地准备
 
-1. 准备 JDK 8、Node.js、Python 3.12、MySQL、Redis 和 Docker Desktop。
-2. 创建 `db_beadhouse` 数据库。含业务演示数据的原始数据库备份涉及个人信息，不进入 Git 仓库，请由项目负责人通过安全渠道提供脱敏种子数据。
-3. 执行 `数据库/ai_care_upgrade.sql`。
-4. 安装前端、后端和 `源码/beadhouse-ai/README.md` 中列出的依赖。
-5. 运行 `启动AI养老院.ps1`，访问 `http://127.0.0.1:8080`。
+1. 准备 JDK 8、Node.js、Python 3.12 和 Docker Desktop，不需要单独安装 MySQL 或 Redis。
+2. 复制 `.env.example` 为 `.env`，按需修改本地密码和内部令牌。
+3. 安装前端、后端和 `源码/beadhouse-ai/README.md` 中列出的依赖。
+4. 运行 `启动AI养老院.ps1`。脚本会启动 Docker 基础设施，再启动本机 Spring Boot、FastAPI 和 Vue。
+5. 访问 `http://127.0.0.1:8080`。
+
+MySQL 容器首次创建数据卷时会依次导入 `数据库/db_beadhouse.sql` 和 `数据库/ai_care_upgrade.sql`。演示库里的身份信息与联系方式均为虚构测试数据。已有数据卷不会重复初始化；需要重新初始化时应先自行备份，再显式删除对应 Docker volume。
 
 ## 安全约定
 
 - 不提交账号、API Key、数据库密码、日志、上传文件和本地运行数据。
-- MySQL、Redis、JWT、邮件、RAG 与 Milvus 凭据通过环境变量或本地配置提供。
+- MySQL、Redis、JWT、邮件、RAG 与 Milvus 凭据通过 `.env`、环境变量或本地配置提供。
 - 提交前检查 `git status`，确认没有 `.runtime`、`.env`、数据库数据文件和账号文件。
 
 详细功能和验收方法见 [AI护理工作台使用说明.md](./AI护理工作台使用说明.md)。

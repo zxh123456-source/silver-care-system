@@ -5,6 +5,15 @@ $runtimeDir = Join-Path $projectRoot ".runtime"
 $logDir = Join-Path $runtimeDir "logs"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 
+$dotenv = Join-Path $projectRoot ".env"
+if (Test-Path -LiteralPath $dotenv) {
+    foreach ($line in Get-Content -LiteralPath $dotenv -Encoding UTF8) {
+        if ($line -match '^\s*([A-Z][A-Z0-9_]*)\s*=\s*(.*)\s*$') {
+            [Environment]::SetEnvironmentVariable($matches[1], $matches[2].Trim('"').Trim("'"), "Process")
+        }
+    }
+}
+
 $localConfig = Join-Path $projectRoot "本地配置.ps1"
 if (Test-Path -LiteralPath $localConfig) {
     . $localConfig
@@ -28,34 +37,29 @@ function Test-TcpEndpoint([int]$port) {
     }
 }
 
-if (-not (Test-Port 3306)) {
-    throw "MySQL 3306 端口未启动，请先启动 MySQL。"
-}
-
-if (-not (Test-Port 6379)) {
-    $redisPath = Join-Path $projectRoot "redis\Redis-x64-3.2.100\redis-server.exe"
-    $redisProcess = Start-Process -FilePath $redisPath -WorkingDirectory (Split-Path $redisPath) -WindowStyle Hidden -PassThru
-    Set-Content -LiteralPath (Join-Path $runtimeDir "redis.pid") -Value $redisProcess.Id
-}
-
 $dockerPath = "C:\Program Files\Docker\Docker\resources\bin\docker.exe"
-$milvusCompose = Join-Path $projectRoot "源码\beadhouse-ai\docker-compose.milvus.yml"
-if ((Test-Path -LiteralPath $dockerPath) -and (Test-Path -LiteralPath $milvusCompose)) {
-    $env:PATH = "C:\Program Files\Docker\Docker\resources\bin;" + $env:PATH
-    try {
-        & $dockerPath info --format "{{.ServerVersion}}" | Out-Null
-        if (-not (Test-TcpEndpoint 19530)) {
-            & $dockerPath compose -f $milvusCompose up -d | Out-Host
-            for ($attempt = 0; $attempt -lt 30 -and -not (Test-TcpEndpoint 19530); $attempt++) {
-                Start-Sleep -Seconds 1
-            }
-        }
-    } catch {
-        Write-Warning "Docker/Milvus 未就绪，RAG 将使用本地混合检索。"
+$infraCompose = Join-Path $projectRoot "docker-compose.yml"
+if (-not (Test-Path -LiteralPath $dockerPath)) {
+    throw "未找到 Docker Desktop。MySQL、Redis 和 Milvus 均由 Docker Compose 提供。"
+}
+$env:PATH = "C:\Program Files\Docker\Docker\resources\bin;" + $env:PATH
+& $dockerPath info --format "{{.ServerVersion}}" | Out-Null
+& $dockerPath compose -f $infraCompose up -d | Out-Host
+
+foreach ($port in @(3306, 6379, 19530)) {
+    for ($attempt = 0; $attempt -lt 60 -and -not (Test-TcpEndpoint $port); $attempt++) {
+        Start-Sleep -Seconds 1
+    }
+    if (-not (Test-TcpEndpoint $port)) {
+        throw "Docker 基础设施端口 $port 未就绪，请执行 docker compose ps 查看状态。"
     }
 }
 
-$env:RAG_BACKEND = if (Test-TcpEndpoint 19530) { "milvus" } else { "memory" }
+if (-not $env:DB_USERNAME) { $env:DB_USERNAME = "root" }
+if (-not $env:DB_PASSWORD) { $env:DB_PASSWORD = if ($env:MYSQL_ROOT_PASSWORD) { $env:MYSQL_ROOT_PASSWORD } else { "123456" } }
+if (-not $env:REDIS_PASSWORD) { $env:REDIS_PASSWORD = "redis-dev-password" }
+
+$env:RAG_BACKEND = "milvus"
 
 # OCR 只在有 Tesseract 和语言数据时自动启用。相对路径从后端工作目录解析，可避免 Windows 中文路径导致 Tesseract 无法读取数据。
 $ocrDataDir = Join-Path $runtimeDir "ocr\tessdata"
@@ -125,12 +129,8 @@ $status = @(6379, 8001, 9001, 8080) | ForEach-Object {
 }
 $status | Format-Table -AutoSize
 
-if (($status | Where-Object { $_.Port -in @(6379, 9001, 8080) }).Listening -contains $false) {
+if (($status | Where-Object { $_.Port -in @(6379, 8001, 9001, 8080) }).Listening -contains $false) {
     throw "部分服务启动失败，请检查 $logDir 下的日志。"
-}
-
-if (-not (Test-Port 8001)) {
-    Write-Warning "FastAPI RAG 服务未启动，制度问答会自动使用本地检索。"
 }
 
 Write-Host "系统已启动：http://127.0.0.1:8080" -ForegroundColor Green

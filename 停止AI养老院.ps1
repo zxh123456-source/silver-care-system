@@ -42,26 +42,25 @@ function Stop-TrackedProcess([string]$name, [string]$commandHint) {
     Remove-Item -LiteralPath $pidFile -Force -ErrorAction SilentlyContinue
 }
 
-foreach ($name in @("frontend", "backend", "rag", "redis")) {
+foreach ($name in @("frontend", "backend", "rag")) {
     $hint = switch ($name) {
         "frontend" { "beadhouse-frontend"; break }
         "backend" { "beadhouse-backend"; break }
         "rag" { "beadhouse-ai"; break }
-        "redis" { "Redis-x64"; break }
     }
     Stop-TrackedProcess $name $hint
 }
 
 $dockerPath = "C:\Program Files\Docker\Docker\resources\bin\docker.exe"
-$milvusCompose = Join-Path $projectRoot "源码\beadhouse-ai\docker-compose.milvus.yml"
-if ((Test-Path -LiteralPath $dockerPath) -and (Test-Path -LiteralPath $milvusCompose)) {
+$infraCompose = Join-Path $projectRoot "docker-compose.yml"
+if ((Test-Path -LiteralPath $dockerPath) -and (Test-Path -LiteralPath $infraCompose)) {
     $env:PATH = "C:\Program Files\Docker\Docker\resources\bin;" + $env:PATH
     try {
-        & $dockerPath compose -f $milvusCompose stop | Out-Host
-        Write-Host "已停止 Milvus 容器，数据卷仍保留。"
+        & $dockerPath compose -f $infraCompose stop | Out-Host
+        Write-Host "已停止 MySQL、Redis 和 Milvus 容器，数据卷仍保留。"
     } catch {
-        Write-Warning "Milvus 容器停止失败，请在 Docker Desktop 中检查。"
+        Write-Warning "基础设施容器停止失败，请在 Docker Desktop 中检查。"
     }
 }
 
-Write-Host "停止完成。脚本只处理由启动脚本记录的进程和本项目 Milvus 容器。" -ForegroundColor Green
+Write-Host "停止完成。脚本只处理由启动脚本记录的进程和本项目 Docker 容器。" -ForegroundColor Green

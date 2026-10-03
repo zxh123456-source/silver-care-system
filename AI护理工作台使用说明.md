@@ -4,11 +4,11 @@
 
 ## 启用步骤
 
-1. 在 MySQL 的 `db_beadhouse` 数据库执行 `数据库/ai_care_upgrade.sql`。
-2. 执行 `启动AI养老院.ps1`，脚本会使用 JDK 8 启动 Redis、Spring Boot 和 Vue 前端；MySQL 需要预先启动。
+1. 复制 `.env.example` 为 `.env`，配置本地开发密码。
+2. 执行 `启动AI养老院.ps1`。脚本会通过 Docker Compose 启动 MySQL、Redis、Milvus、etcd 和 MinIO，再使用 JDK 8 启动 Spring Boot、FastAPI 和 Vue 前端。
 3. 使用管理员账号重新登录，进入“AI护理工作台”。首次执行迁移或修改角色权限后，需要退出再登录以刷新 Redis 权限缓存。
 
-停止由脚本启动的进程时执行 `停止AI养老院.ps1`。运行日志保存在项目 `.runtime/logs` 目录。
+停止由脚本启动的进程和容器时执行 `停止AI养老院.ps1`。Docker 数据卷默认保留，运行日志保存在项目 `.runtime/logs` 目录。
 
 迁移脚本会创建 `care_note` 表、菜单权限，并给管理员角色分配菜单。已有数据库重复执行时，表和菜单写入使用幂等语句。
 
