@@ -1,0 +1,41 @@
+# Runtime data and logs
+.runtime/
+*.log
+
+# Local credentials and personal/sample records
+账号.txt
+数据库/db_beadhouse.sql
+.env
+.env.*
+!.env.example
+本地配置.ps1
+
+# Java
+源码/beadhouse-backend/target/
+源码/beadhouse-backend/.idea/
+源码/beadhouse-backend/*.iml
+
+# Vue / Node
+源码/beadhouse-frontend/node_modules/
+源码/beadhouse-frontend/dist/
+源码/beadhouse-frontend/.idea/
+
+# Python / AI runtime
+源码/beadhouse-ai/.venv/
+源码/beadhouse-ai/__pycache__/
+源码/beadhouse-ai/**/__pycache__/
+源码/beadhouse-ai/.pytest_cache/
+源码/beadhouse-ai/.milvus/
+源码/beadhouse-ai/data/*.json
+源码/beadhouse-ai/evals/latest_report.json
+源码/beadhouse-ai/evals/latest_report.xml
+*.pyc
+
+# Local middleware binaries and uploaded files
+redis/
+exam/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/

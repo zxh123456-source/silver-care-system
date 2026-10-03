@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.shanzhu.beadhouse.dao.mapper.PolicyRagSyncMapper">
+    <insert id="upsertDesired">
+        INSERT INTO policy_rag_sync
+            (document_key, title, source, desired_action, revision, status,
+             attempt_count, next_retry_time, create_id, create_time, update_id, update_time)
+        VALUES
+            (#{documentKey}, #{title}, #{source}, #{desiredAction}, #{revision}, 'PENDING',
+             0, NOW(), 1, NOW(), 1, NOW())
+        ON DUPLICATE KEY UPDATE
+            title = VALUES(title),
+            source = VALUES(source),
+            desired_action = VALUES(desired_action),
+            revision = VALUES(revision),
+            status = 'PENDING',
+            attempt_count = 0,
+            next_retry_time = NOW(),
+            last_error_code = NULL,
+            update_time = NOW()
+    </insert>
+    <select id="listDue" resultType="com.shanzhu.beadhouse.entity.po.PolicyRagSync">
+        SELECT * FROM policy_rag_sync
+        WHERE status IN ('PENDING', 'FAILED') AND next_retry_time &lt;= NOW()
+        ORDER BY next_retry_time ASC, id ASC
+        LIMIT #{limit}
+    </select>
+    <update id="markSynced">
+        UPDATE policy_rag_sync
+        SET status = 'SYNCED', last_error_code = NULL, update_time = NOW()
+        WHERE document_key = #{documentKey}
+          AND desired_action = #{desiredAction}
+          AND ((revision = #{revision}) OR (revision IS NULL AND #{revision} IS NULL))
+    </update>
+    <update id="markFailed">
+        UPDATE policy_rag_sync
+        SET status = 'FAILED',
+            attempt_count = attempt_count + 1,
+            next_retry_time = DATE_ADD(NOW(), INTERVAL LEAST(300, POW(2, attempt_count + 1)) SECOND),
+            last_error_code = #{errorCode},
+            update_time = NOW()
+        WHERE document_key = #{documentKey}
+          AND desired_action = #{desiredAction}
+          AND ((revision = #{revision}) OR (revision IS NULL AND #{revision} IS NULL))
+    </update>
+</mapper>

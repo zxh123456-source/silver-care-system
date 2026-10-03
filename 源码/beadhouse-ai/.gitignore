@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+.env
+data/*.json
+.milvus/
+evals/latest_report.json
+evals/latest_report.xml

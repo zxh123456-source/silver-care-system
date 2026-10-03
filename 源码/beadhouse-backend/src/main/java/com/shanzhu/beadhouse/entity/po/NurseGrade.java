@@ -1,0 +1,44 @@
+package com.shanzhu.beadhouse.entity.po;
+
+import java.math.BigDecimal;
+
+import com.shanzhu.beadhouse.entity.base.BaseEntity;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
+
+/**
+ * <p>
+ * 护理等级表
+ * </p>
+ *
+ * @author: ShanZhu
+ * @date: 2024-08-10
+ */
+@Data
+@EqualsAndHashCode(callSuper = true)
+public class NurseGrade extends BaseEntity {
+
+    private static final long serialVersionUID = 1L;
+
+    /**
+     * 级别名称
+     */
+    private String name;
+
+    /**
+     * 护理类型
+     */
+    private String type;
+
+    /**
+     * 月护理费用
+     */
+    private BigDecimal monthPrice;
+
+    /**
+     * 删除状态（Y/N）
+     */
+    private String delFlag;
+
+
+}

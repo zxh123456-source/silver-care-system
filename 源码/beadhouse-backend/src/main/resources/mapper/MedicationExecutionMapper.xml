@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.shanzhu.beadhouse.dao.mapper.MedicationExecutionMapper">
+    <insert id="upsertExecution" useGeneratedKeys="true" keyProperty="execution.id">
+        INSERT INTO medication_execution
+            (plan_id, elder_id, execution_date, period, status, executed_time, note,
+             create_id, create_time, update_id, update_time)
+        VALUES
+            (#{execution.planId}, #{execution.elderId}, #{execution.executionDate}, #{execution.period},
+             #{execution.status}, #{execution.executedTime}, #{execution.note},
+             #{operatorId}, NOW(), #{operatorId}, NOW())
+        ON DUPLICATE KEY UPDATE
+            id = LAST_INSERT_ID(id),
+            status = VALUES(status),
+            executed_time = VALUES(executed_time),
+            note = VALUES(note),
+            update_id = VALUES(update_id),
+            update_time = NOW()
+    </insert>
+</mapper>

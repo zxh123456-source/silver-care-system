@@ -1,0 +1,10 @@
+package com.shanzhu.beadhouse.entity.base;
+
+import io.swagger.annotations.ApiModelProperty;
+import lombok.Data;
+
+@Data
+public class Rank {
+    @ApiModelProperty(value = "序号", example = "1")
+    private Long rank;
+}

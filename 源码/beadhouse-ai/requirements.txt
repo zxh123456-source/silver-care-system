@@ -1,0 +1,2 @@
+-r requirements-local.txt
+pymilvus==2.6.17
