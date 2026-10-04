@@ -5,11 +5,14 @@ import io.swagger.annotations.ApiModel;
 import io.swagger.annotations.ApiModelProperty;
 import lombok.Data;
 
+import java.io.Serializable;
 import java.util.List;
 
 @Data
 @ApiModel(value = "登录用户响应实体")
-public class LoginUserVo {
+public class LoginUserVo implements Serializable {
+    private static final long serialVersionUID = 1L;
+
     @ApiModelProperty(value = "id", example = "1")
     private Long id;
     @ApiModelProperty(value = "角色编号", example = "1")
