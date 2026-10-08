@@ -111,6 +111,10 @@ ignore:
     - /account/edit
     - /account/logout
 
+security:
+  password-reset:
+    email-enabled: ${PASSWORD_RESET_EMAIL_ENABLED:false}
+
 ai:
   provider:
     enabled: ${AI_PROVIDER_ENABLED:false}

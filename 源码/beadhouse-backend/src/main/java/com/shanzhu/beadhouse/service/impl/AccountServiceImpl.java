@@ -17,6 +17,12 @@ import com.shanzhu.beadhouse.entity.query.SendCodeQuery;
 import com.shanzhu.beadhouse.entity.vo.LoginUserVo;
 import com.shanzhu.beadhouse.service.AccountService;
 import com.shanzhu.beadhouse.service.common.StaffFunc;
+import com.shanzhu.beadhouse.service.common.PasswordResetGuard;
+import com.shanzhu.beadhouse.service.common.PasswordResetDelivery;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
+import java.security.SecureRandom;
+import java.nio.charset.StandardCharsets;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -40,6 +46,9 @@ public class AccountServiceImpl implements AccountService {
     private StaffFunc staffFunc;
     @Resource
     private PasswordEncoderImpl passwordEncoder;
+    @Resource private PasswordResetGuard resetGuard;
+    @Resource private PasswordResetDelivery resetDelivery;
+    private final SecureRandom resetRandom = new SecureRandom();
 
     @Override
     public Result login(LoginQuery query) {
@@ -71,54 +80,44 @@ public class AccountServiceImpl implements AccountService {
 
     @Override
     public Result sendCode(SendCodeQuery query) {
-        // 忘记密码时验证账号信息
-        staffFunc.forgetCheckAccountAndPass(query.getAccount(), query.getPass());
-        // 重复发送验证码
-        AssertUtil.isNull(redisUtil.getCacheObject(query.getAccount()), ExceptionEnum.REPEAT_SEND_CODE);
-        // 生成验证码
-        int num = (int) ((Math.random() * 9 + 1) * (Math.pow(10, 5)));
-        String code = String.valueOf(num);
-        // 实例化返回数据
-        Result result = Result.success();
-        // 账号为邮箱
-        if (ReUtil.isMatch(Constant.EMAIL_REGULAR, query.getAccount())) {
-            // 发送邮件
-            SendEmailUtil.sendEmail(
-                    new ArrayList<>(Collections.singletonList(query.getAccount())),
-                    "验证码：" + code
-            );
-            // 账号为手机号
-        } else if (ReUtil.isMatch(Constant.PHONE_REGULAR, query.getAccount())) {
-            // 因服务原因，无法发送，直接返回code
-            result.setData(code);
-            // 账号既不是邮箱也不是手机号
-        } else {
-            return Result.error(ExceptionEnum.ACCOUNT_FORMAT_ERROR);
+        String account = query == null ? "" : normalizeAccount(query.getAccount());
+        if (!ReUtil.isMatch(Constant.EMAIL_REGULAR, account))
+            return Result.error(400, "请使用已登记邮箱找回密码；手机号找回请联系管理员");
+        resetGuard.throttle("send", account, clientIp());
+        resetDelivery.requireAvailable();
+        Staff staff = staffFunc.getStaffByAccount(account);
+        if (staff != null && account.equals(staff.getEmail())) {
+            String code = String.format("%06d", resetRandom.nextInt(1000000));
+            resetGuard.issue(account, code);
+            try { resetDelivery.send(staff.getEmail(), code); }
+            catch (RuntimeException failure) { resetGuard.discard(account); throw failure; }
         }
-        // 将验证码存入redis，账号作为key
-        redisUtil.setCacheObject(query.getAccount(), code, 60 * 1000L, TimeUnit.MILLISECONDS);
-        return result;
+        return Result.success("如果邮箱已登记，验证码将发送至该邮箱");
     }
 
     @Override
     public Result forget(ForgetQuery query) {
-        // 验证并获取忘记密码的账号信息
-        Staff staff = staffFunc.forgetCheckAccountAndPass(query.getAccount(), query.getPass());
-        // 通过账号取出code
-        String code = redisUtil.getCacheObject(query.getAccount());
-        // 验证码过期
-        AssertUtil.notNull(code, ExceptionEnum.CODE_EXPIRE);
-        // 验证码错误
-        AssertUtil.isTrue(Objects.equals(code, query.getCode()), ExceptionEnum.CODE_ERROR);
-        // 封装修改密码
+        String account = query == null ? "" : normalizeAccount(query.getAccount());
+        if (query == null || !ReUtil.isMatch(Constant.EMAIL_REGULAR, account)
+                || query.getPass() == null || query.getPass().length() < 8 || query.getPass().length() > 64
+                || query.getPass().getBytes(StandardCharsets.UTF_8).length > 72)
+            return Result.error(400, "请填写已登记邮箱和8至64位新密码（UTF-8不超过72字节）");
+        resetGuard.throttle("verify", account, clientIp());
+        resetGuard.consume(account, query.getCode() == null ? "" : query.getCode());
+        Staff staff = staffFunc.getStaffByAccount(account);
+        if (staff == null || !account.equals(staff.getEmail())) return Result.error(400, "验证码无效或已过期，请重新申请");
         staff.setPass(passwordEncoder.encode(query.getPass()));
-        // 修改
         staffMapper.updateById(staff);
-        // 删除redis该账号的验证码缓存
-        redisUtil.deleteObject(query.getAccount());
-        // 删除redis登录信息
         redisUtil.deleteObject(Constant.LOGIN_REDIS + staff.getId());
         return Result.success();
+    }
+
+    private String normalizeAccount(String account) { return account == null ? "" : account.trim(); }
+
+    private String clientIp() {
+        ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+        // Do not trust caller-controlled X-Forwarded-For headers.
+        return attributes == null ? "local" : attributes.getRequest().getRemoteAddr();
     }
 
     @Override

@@ -14,7 +14,7 @@
           <el-form-item prop="phone">
             <el-input
               v-model="formData.phone"
-              placeholder="账号"
+              placeholder="已登记邮箱"
               :prefix-icon="useRenderIcon('user', { size: 12 })"
               clearable
             />
@@ -96,7 +96,6 @@
 import { reactive, ref } from 'vue'
 import { useRenderIcon } from '@/hooks/useIcons'
 import { FormInstance, FormRules, ElMessage } from 'element-plus'
-import { isNotAccount } from '@/utils/is'
 import { forgetPass, sendCode } from '@/apis/user'
 
 const ruleFormRef = ref<FormInstance | null>(null)
@@ -113,25 +112,20 @@ const loading = ref(false)
 // 处理发送验证码
 const sendCodeHandle = async () => {
   const account = formData.value.phone.trim()
-  const pass = formData.value.password.trim()
   // 验证是否能发送验证码
-  if (!account || !pass) {
+  if (!account || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(account)) {
     ElMessage({
-      message: '账号和密码不能为空',
+      message: '请填写已登记邮箱',
       type: 'warning'
     })
     return
   }
   // 发送验证码
   const res: any = await sendCode({
-    account: formData.value.phone,
-    pass: formData.value.password
+    account
   })
   if (res.code === 200) {
-    // 验证码不为空则填入输入框
-    if (res.data !== null) {
-      formData.value.verifyCode = res.data
-    }
+    ElMessage.success(res.msg)
     // 禁用按钮
     SEND_code_FLAG.value = true
     // 倒计时
@@ -193,8 +187,8 @@ const forgetPassRules = reactive<FormRules>({
         let phone = value?.trim()
         if (phone === '') {
           callback(new Error('账号不能为空'))
-        } else if (isNotAccount(phone)) {
-          callback(new Error('账号格式有误'))
+        } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(phone)) {
+          callback(new Error('请使用已登记邮箱'))
         } else {
           callback()
         }
@@ -208,6 +202,8 @@ const forgetPassRules = reactive<FormRules>({
         const pass = value?.trim()
         if (!pass) {
           callback(new Error('新密码不能为空'))
+        } else if (pass.length < 8 || pass.length > 64) {
+          callback(new Error('新密码需为8至64位'))
         } else {
           callback()
         }
