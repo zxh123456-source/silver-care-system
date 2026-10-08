@@ -13,3 +13,10 @@ $env:MAIL_PASSWORD = "请填写邮箱授权码"
 
 $env:AI_RAG_INTERNAL_TOKEN = "请填写随机内部令牌"
 $env:RAG_INTERNAL_TOKEN = $env:AI_RAG_INTERNAL_TOKEN
+
+$env:MYSQL_ROOT_PASSWORD = $env:DB_PASSWORD
+$env:REDIS_PASSWORD = "请填写Redis随机密码"
+$env:MINIO_ROOT_USER = "silvercare"
+$env:MINIO_ROOT_PASSWORD = "请填写MinIO随机密码"
+$env:MILVUS_ROOT_PASSWORD = "请填写Milvus随机密码"
+$env:RAG_MILVUS_TOKEN = "root:" + $env:MILVUS_ROOT_PASSWORD

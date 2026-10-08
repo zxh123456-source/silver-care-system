@@ -4,13 +4,15 @@
 
 ## 启用步骤
 
-1. 复制 `.env.example` 为 `.env`，配置本地开发密码。
+1. 首次执行 `初始化本地配置.ps1` 生成随机密钥到 `.env`，已有 `.env` 请参考 `.env.example` 补齐变量，勿覆盖旧数据卷凭据。
 2. 执行 `启动AI养老院.ps1`。脚本会通过 Docker Compose 启动 MySQL、Redis、Milvus、etcd 和 MinIO，再使用 JDK 8 启动 Spring Boot、FastAPI 和 Vue 前端。
 3. 使用管理员账号重新登录，进入“AI护理工作台”。首次执行迁移或修改角色权限后，需要退出再登录以刷新 Redis 权限缓存。
 
 停止由脚本启动的进程和容器时执行 `停止AI养老院.ps1`。Docker 数据卷默认保留，运行日志保存在项目 `.runtime/logs` 目录。
 
 迁移脚本会创建 `care_note` 表、菜单权限，并给管理员角色分配菜单。已有数据库重复执行时，表和菜单写入使用幂等语句。
+
+启动时检查数据库、Redis、JWT、RAG、MinIO 和 Milvus 密钥，未配置会提前报错。历史演示账号登录需要本地配置 `LEGACY_AES_IV`、`LEGACY_AES_KEY`；新密码使用 BCrypt。完整配置与已有数据卷轮换注意事项见根目录 README。
 
 ## 功能入口
 

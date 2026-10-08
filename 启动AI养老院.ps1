@@ -19,6 +19,9 @@ if (Test-Path -LiteralPath $localConfig) {
     . $localConfig
 }
 
+. (Join-Path $projectRoot '校验环境.ps1')
+Assert-ProjectEnvironment
+
 function Test-Port([int]$port) {
     return $null -ne (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
 }
@@ -44,7 +47,9 @@ if (-not (Test-Path -LiteralPath $dockerPath)) {
 }
 $env:PATH = "C:\Program Files\Docker\Docker\resources\bin;" + $env:PATH
 & $dockerPath info --format "{{.ServerVersion}}" | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'Docker Desktop 未就绪' }
 & $dockerPath compose -f $infraCompose up -d | Out-Host
+if ($LASTEXITCODE -ne 0) { throw 'Docker Compose 启动失败，请检查配置和端口' }
 
 foreach ($port in @(3308, 6379, 19530)) {
     for ($attempt = 0; $attempt -lt 60 -and -not (Test-TcpEndpoint $port); $attempt++) {
@@ -56,8 +61,6 @@ foreach ($port in @(3308, 6379, 19530)) {
 }
 
 if (-not $env:DB_USERNAME) { $env:DB_USERNAME = "root" }
-if (-not $env:DB_PASSWORD) { $env:DB_PASSWORD = if ($env:MYSQL_ROOT_PASSWORD) { $env:MYSQL_ROOT_PASSWORD } else { "123456" } }
-if (-not $env:REDIS_PASSWORD) { $env:REDIS_PASSWORD = "redis-dev-password" }
 
 $env:RAG_BACKEND = "milvus"
 

@@ -27,7 +27,7 @@ public class PolicyRagClient {
     private boolean enabled;
     @Value("${ai.rag.url:http://127.0.0.1:8001}")
     private String baseUrl;
-    @Value("${ai.rag.internal-token:local-dev-token}")
+    @Value("${ai.rag.internal-token:}")
     private String internalToken;
     @Value("${ai.rag.connect-timeout-ms:500}")
     private int connectTimeoutMs;
