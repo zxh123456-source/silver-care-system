@@ -1,0 +1,182 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend / MySQL + Redis integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: 源码/beadhouse-backend
+        shell: bash
+    env:
+      TZ: Asia/Shanghai
+      # Disposable CI fixtures only; no application or repository secrets are used.
+      JWT_SECRET: ci-only-jwt-secret-with-at-least-32-bytes
+      LEGACY_AES_IV: test-fixture-iv!
+      LEGACY_AES_KEY: test-fixture-key
+      SCOPE_TEST_DB_URL: jdbc:mysql://127.0.0.1:13318/db_beadhouse?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+      SCOPE_TEST_DB_PASSWORD: scope-test-only
+      SCOPE_HTTP_REDIS_PORT: '16390'
+      RESET_TEST_REDIS_PORT: '16391'
+      DAILY_HTTP_TEST: 'true'
+      ALERT_HTTP_TEST: 'true'
+      FILESAVE_LINUX: ./target/scope-exports
+    services:
+      mysql:
+        image: mysql:8.0.40
+        env:
+          MYSQL_ROOT_PASSWORD: scope-test-only
+          MYSQL_ROOT_HOST: '%'
+          MYSQL_DATABASE: db_beadhouse
+          TZ: Asia/Shanghai
+        ports:
+          - 13318:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pscope-test-only --silent"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=40
+      reset-redis:
+        image: redis:7.4.2-alpine
+        ports:
+          - 16391:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
+        with:
+          distribution: temurin
+          java-version: '8'
+          cache: maven
+          cache-dependency-path: 源码/beadhouse-backend/pom.xml
+      - name: Initialize disposable database and authenticated Redis
+        working-directory: .
+        env:
+          MYSQL_CONTAINER: ${{ job.services.mysql.id }}
+          MYSQL_PWD: scope-test-only
+        run: |
+          set -euo pipefail
+          for file in db_beadhouse.sql ai_care_upgrade.sql daily_task_upgrade.sql care_alert_upgrade.sql; do
+            docker exec -i -e MYSQL_PWD "$MYSQL_CONTAINER" \
+              mysql --default-character-set=utf8mb4 -uroot db_beadhouse < "数据库/$file"
+          done
+          docker run -d --name silvercare-ci-redis --publish 127.0.0.1:16390:6379 \
+            redis:7.4.2-alpine redis-server --requirepass scope-redis-only
+          for attempt in $(seq 1 30); do
+            if docker exec silvercare-ci-redis redis-cli --no-auth-warning -a scope-redis-only ping | grep -q PONG; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo 'Authenticated Redis did not become ready' >&2
+          exit 1
+      - name: Build and run all backend tests
+        run: mvn --batch-mode --no-transfer-progress -Dfile.encoding=UTF-8 verify
+      - name: Require all six integration suites to execute
+        if: always()
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          required = (
+              'DemoAccountInitializerIntegrationTest',
+              'LegacyScopeSqlIntegrationTest',
+              'LegacyScopeHttpIntegrationTest',
+              'DailyTaskHttpIntegrationTest',
+              'CareAlertHttpIntegrationTest',
+              'PasswordResetGuardIntegrationTest',
+          )
+          reports = Path('target/surefire-reports')
+          for suite in required:
+              matches = list(reports.glob(f'TEST-*.{suite}.xml'))
+              if len(matches) != 1:
+                  raise SystemExit(f'Missing or ambiguous report: {suite}')
+              result = ET.parse(matches[0]).getroot()
+              if int(result.get('tests', '0')) == 0 or any(
+                  int(result.get(key, '0')) for key in ('skipped', 'failures', 'errors')
+              ):
+                  raise SystemExit(f'Integration suite did not pass without skips: {suite}')
+              print(f'Executed and passed: {suite}')
+          PY
+      - name: Upload backend test reports
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: backend-test-reports
+          path: 源码/beadhouse-backend/target/surefire-reports/
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Remove authenticated test Redis
+        if: always()
+        run: docker rm -f silvercare-ci-redis || true
+
+  frontend:
+    name: Frontend / clean install + build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: 源码/beadhouse-frontend
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: 源码/beadhouse-frontend/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Build with TypeScript and ESLint checks
+        run: npm run build
+
+  python:
+    name: Python / dependencies + tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: 源码/beadhouse-ai
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: 源码/beadhouse-ai/requirements*.txt
+      - name: Install full service dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Test settings, retrieval and injection guards
+        run: python -m pytest -q --junitxml=test-results/pytest.xml
+      - name: Upload Python test report
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: python-test-reports
+          path: 源码/beadhouse-ai/test-results/pytest.xml
+          if-no-files-found: warn
+          retention-days: 7

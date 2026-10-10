@@ -104,4 +104,8 @@ Get-Content -Raw -Encoding UTF8 数据库/daily_task_upgrade.sql | docker compos
 
 ## 配置回归检查
 
+GitHub Actions 的 `CI` 工作流在 main 推送、面向 main 的 PR（含草稿）及手动触发时运行：后端 JDK 8 完整构建和独立 MySQL/Redis 集成测试、前端 Node 24 全新 `npm ci` 与生产构建、Python 3.12 全量服务依赖安装与 pytest。关键的六组后端集成测试若未执行或被跳过，CI 会失败，避免仅单元测试通过。测试报告作为 artifact 保留7天；普通 ESLint 警告不会导致构建失败。
+
+CI 使用临时库和公开的合成测试凭据，不读取本地 `.env`，不需要配置 GitHub Secrets，也不调用真实邮件或外部模型。OCR 测试仍按现有环境条件执行；当前测试使用 Windows Tesseract 路径，在 Linux runner 中会跳过。CI 不代替浏览器验收、BGE 质量评测或完整本机启动验证。
+
 PowerShell 下运行后端测试时，设置仅用于测试的 `JWT_SECRET`（至少32字节）、`LEGACY_AES_IV`（16字节）和 `LEGACY_AES_KEY`（16字节）再执行 `mvn test`。这些只用于合成测试，不需要生产密钥。Redis 并发测试需要单独的临时 Redis 并设置 `RESET_TEST_REDIS_PORT`。Python 执行 `python -m pytest -q` 覆盖缺失、弱令牌和 Milvus 凭据校验；执行真实 RAG 评测前须提供有效 `RAG_INTERNAL_TOKEN`。
