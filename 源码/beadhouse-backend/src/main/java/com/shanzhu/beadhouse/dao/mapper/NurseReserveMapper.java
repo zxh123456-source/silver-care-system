@@ -23,5 +23,6 @@ public interface NurseReserveMapper extends BaseMapper<NurseReserve> {
      * @param keyQuery
      * @return
      */
-    List<PageNurseReserveByKeyVo> listNurseReserveByKey(@Param("keyQuery") PageNurseReserveByKeyQuery keyQuery);
+    List<PageNurseReserveByKeyVo> listNurseReserveByKey(@Param("keyQuery") PageNurseReserveByKeyQuery keyQuery,
+            @Param("scopeStaffId") Long scopeStaffId);
 }

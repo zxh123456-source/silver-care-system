@@ -19,6 +19,16 @@ if (Test-Path -LiteralPath $localConfig) {
     . $localConfig
 }
 
+. (Join-Path $projectRoot '校验环境.ps1')
+Assert-ProjectEnvironment
+
+$ragPython = Join-Path $projectRoot "源码\beadhouse-ai\.venv\Scripts\python.exe"
+$backendJar = Join-Path $projectRoot "源码\beadhouse-backend\target\beadhouse-backend-0.0.1-SNAPSHOT.jar"
+if (-not (Test-Path -LiteralPath $ragPython)) { throw '缺少 Python 虚拟环境，请按 README 安装 AI 服务依赖。' }
+if (-not (Test-Path -LiteralPath $backendJar)) { throw '缺少后端 JAR，请先在后端目录执行 mvn package -DskipTests。' }
+if (-not (Test-Path -LiteralPath (Join-Path $projectRoot '源码/beadhouse-frontend/node_modules/.bin/vue-cli-service.cmd'))) { throw '缺少前端依赖，请先在前端目录执行 npm ci。' }
+$npmPath = (Get-Command npm.cmd -ErrorAction Stop).Source
+
 function Test-Port([int]$port) {
     return $null -ne (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
 }
@@ -44,7 +54,9 @@ if (-not (Test-Path -LiteralPath $dockerPath)) {
 }
 $env:PATH = "C:\Program Files\Docker\Docker\resources\bin;" + $env:PATH
 & $dockerPath info --format "{{.ServerVersion}}" | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'Docker Desktop 未就绪' }
 & $dockerPath compose -f $infraCompose up -d | Out-Host
+if ($LASTEXITCODE -ne 0) { throw 'Docker Compose 启动失败，请检查配置和端口' }
 
 foreach ($port in @(3308, 6379, 19530)) {
     for ($attempt = 0; $attempt -lt 60 -and -not (Test-TcpEndpoint $port); $attempt++) {
@@ -56,8 +68,6 @@ foreach ($port in @(3308, 6379, 19530)) {
 }
 
 if (-not $env:DB_USERNAME) { $env:DB_USERNAME = "root" }
-if (-not $env:DB_PASSWORD) { $env:DB_PASSWORD = if ($env:MYSQL_ROOT_PASSWORD) { $env:MYSQL_ROOT_PASSWORD } else { "123456" } }
-if (-not $env:REDIS_PASSWORD) { $env:REDIS_PASSWORD = "redis-dev-password" }
 
 $env:RAG_BACKEND = "milvus"
 
@@ -95,10 +105,12 @@ if ((Test-Path -LiteralPath $ragPython) -and -not (Test-Port 8001)) {
 }
 
 $javaCandidates = @(
+    $(if ($env:JAVA_HOME) { Join-Path $env:JAVA_HOME 'bin/java.exe' }),
+    $((Get-Command java.exe -ErrorAction SilentlyContinue).Source),
     "C:\Program Files\Java\jdk1.8.0_201\bin\java.exe",
     "C:\Program Files\Java\jre1.8.0_201\bin\java.exe"
 )
-$javaPath = $javaCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+$javaPath = $javaCandidates | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
 if (-not $javaPath) {
     throw "未找到兼容的 JDK 8，请安装 JDK 8 或修改脚本中的 javaCandidates。"
 }
@@ -115,7 +127,7 @@ if (-not (Test-Port 9001)) {
 
 if (-not (Test-Port 8080)) {
     $frontendDir = Join-Path $projectRoot "源码\beadhouse-frontend"
-    $frontendProcess = Start-Process -FilePath "C:\Program Files\nodejs\npm.cmd" `
+    $frontendProcess = Start-Process -FilePath $npmPath `
         -ArgumentList "run", "dev", "--", "--port", "8080" `
         -WorkingDirectory $frontendDir -WindowStyle Hidden -PassThru `
         -RedirectStandardOutput (Join-Path $logDir "frontend.log") `

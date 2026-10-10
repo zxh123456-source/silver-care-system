@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.shanzhu.beadhouse.dao.mapper.CareAlertMapper">
+    <insert id="upsertEvidence">
+        INSERT INTO ai_care_alert(alert_key,elder_id,source_id,kind,detail,evidence_key,task_key)
+        VALUES(#{alert.alertKey},#{alert.elderId},#{alert.sourceId},#{alert.kind},#{alert.detail},#{alert.evidenceKey},#{alert.taskKey})
+        ON DUPLICATE KEY UPDATE
+            state=IF(evidence_key != VALUES(evidence_key),'OPEN',state),
+            reviewer_id=IF(evidence_key != VALUES(evidence_key),NULL,reviewer_id),
+            resolution_note=IF(evidence_key != VALUES(evidence_key),NULL,resolution_note),
+            resolved_at=IF(evidence_key != VALUES(evidence_key),NULL,resolved_at),
+            revision=IF(evidence_key != VALUES(evidence_key),revision+1,revision),
+            kind=VALUES(kind),detail=VALUES(detail),task_key=VALUES(task_key),evidence_key=VALUES(evidence_key)
+    </insert>
+    <select id="lockById" resultType="com.shanzhu.beadhouse.entity.po.CareAlert">
+        SELECT * FROM ai_care_alert WHERE id=#{id} FOR UPDATE
+    </select>
+    <update id="resolveRecorded">
+        UPDATE ai_care_alert SET resolution_note=IF(state='RESOLVED',resolution_note,'执行记录已登记为已执行，仍可查看历史'),
+            resolved_at=IF(state='RESOLVED',resolved_at,NOW()),state='RESOLVED',evidence_key=REPEAT('0',64),revision=revision+1
+        WHERE alert_key=#{key} AND evidence_key != REPEAT('0',64)
+    </update>
+</mapper>

@@ -25,6 +25,8 @@ import java.util.Objects;
 @Service
 public class DepositRechargeServiceImpl implements DepositRechargeService {
     @Resource
+    private com.shanzhu.beadhouse.service.common.AiDataScopeService dataScopeService;
+    @Resource
     private CommonFunc commonFunc;
     @Resource
     private ElderMapper elderMapper;
@@ -34,7 +36,7 @@ public class DepositRechargeServiceImpl implements DepositRechargeService {
     @Override
     public Result pageDepositRechargeByKey(PageDepositRechargeByKeyQuery query) {
         // 根据搜索关键字查询预存充值信息
-        List<PageDepositRechargeByKeyVo> pageDepositRechargeByKeyVoList = elderMapper.listDepositRechargeByKey(query);
+        List<PageDepositRechargeByKeyVo> pageDepositRechargeByKeyVoList = elderMapper.listDepositRechargeByKey(query, dataScopeService.queryStaffId());
         // 封装返回数据
         PageResult<PageDepositRechargeByKeyVo> pageResult = pageUtil.packPageResultData(pageDepositRechargeByKeyVoList, query.getPageNum(), query.getPageSize());
         return Result.success(pageResult);
@@ -49,8 +51,10 @@ public class DepositRechargeServiceImpl implements DepositRechargeService {
 
     @Override
     public Result recharge(RechargeQuery query) {
+        dataScopeService.assertElderAccess(query.getElderId());
         // 判断是否是入住老人
         Elder elder = elderMapper.selectById(query.getElderId());
+        AssertUtil.notNull(elder, ExceptionEnum.DATA_NOT_EXIST);
         boolean checkFlag = Objects.equals(elder.getCheckFlag(), CheckEnum.ENTER.getStatus()) ||
                 Objects.equals(elder.getCheckFlag(), CheckEnum.EXIT_AUDIT.getStatus());
         AssertUtil.isTrue(checkFlag, ExceptionEnum.NOT_ENTER);

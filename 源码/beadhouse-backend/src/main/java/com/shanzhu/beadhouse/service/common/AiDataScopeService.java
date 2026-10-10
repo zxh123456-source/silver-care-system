@@ -46,13 +46,18 @@ public class AiDataScopeService {
     @Resource
     private StaffMapper staffMapper;
     @Resource
-    private CommonFunc commonFunc;
-    @Resource
     private PageUtil pageUtil;
     @Resource
     private AiAuditRecorder auditRecorder;
     @Value("${ai.data-scope.admin-role-id:1}")
     private long adminRoleId;
+
+    /** Null means administrator. Staff identity is never accepted from a request DTO. */
+    public Long queryStaffId() {
+        if (authorityAssert.getLoginUserInfo() == null)
+            throw new BusinessRuntimeException(403, "需要登录后访问老人数据");
+        return isAdmin() ? null : authorityAssert.getLoginUserId();
+    }
 
     public boolean isAdmin() {
         LoginUserVo user = authorityAssert.getLoginUserInfo();
@@ -64,8 +69,8 @@ public class AiDataScopeService {
 
     public void assertElderAccess(Long elderId) {
         if (elderId == null) throw new BusinessRuntimeException(400, "老人编号不能为空");
-        if (isAdmin()) return;
-        Long staffId = authorityAssert.getLoginUserId();
+        Long staffId = queryStaffId();
+        if (staffId == null) return;
         Long count = assignmentMapper.selectCount(new QueryWrapper<ElderStaffAssignment>()
                 .eq("elder_id", elderId).eq("staff_id", staffId).eq("active", YesNoEnum.YES.getCode()));
         if (count == null || count == 0) throw new BusinessRuntimeException(403, "无权访问该老人数据");
@@ -100,8 +105,10 @@ public class AiDataScopeService {
         if (query.getPageNum() == null || query.getPageNum() < 1) query.setPageNum(1);
         if (query.getPageSize() == null || query.getPageSize() < 1) query.setPageSize(10);
         query.setPageSize(Math.min(query.getPageSize(), 100));
-        List<PageSearchElderByKeyVo> elders = commonFunc.listPageElderByKey(query,
-                Arrays.asList(CheckEnum.ENTER.getStatus(), CheckEnum.EXIT_AUDIT.getStatus()));
+        List<PageSearchElderByKeyVo> elders = cn.hutool.core.bean.BeanUtil.copyToList(
+                elderMapper.listScopedElders(query.getName(), query.getPhone(),
+                        Arrays.asList(CheckEnum.ENTER.getStatus(), CheckEnum.EXIT_AUDIT.getStatus()), queryStaffId()),
+                PageSearchElderByKeyVo.class);
         if (!isAdmin()) {
             Set<Long> allowed = allowedElderIds(elders.stream().map(PageSearchElderByKeyVo::getId).collect(Collectors.toList()));
             elders = elders.stream().filter(item -> allowed.contains(item.getId())).collect(Collectors.toList());

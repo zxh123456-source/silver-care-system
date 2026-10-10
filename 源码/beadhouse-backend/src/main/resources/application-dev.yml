@@ -111,6 +111,10 @@ ignore:
     - /account/edit
     - /account/logout
 
+security:
+  password-reset:
+    email-enabled: ${PASSWORD_RESET_EMAIL_ENABLED:false}
+
 ai:
   provider:
     enabled: ${AI_PROVIDER_ENABLED:false}
@@ -129,7 +133,7 @@ ai:
   rag:
     enabled: ${AI_RAG_ENABLED:true}
     url: ${AI_RAG_URL:http://127.0.0.1:8001}
-    internal-token: ${AI_RAG_INTERNAL_TOKEN:local-dev-token}
+    internal-token: ${AI_RAG_INTERNAL_TOKEN:}
     connect-timeout-ms: ${AI_RAG_CONNECT_TIMEOUT_MS:500}
     read-timeout-ms: ${AI_RAG_READ_TIMEOUT_MS:1500}
     top-k: ${AI_RAG_TOP_K:5}

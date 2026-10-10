@@ -19,17 +19,17 @@ python -m venv .venv
 内部索引与查询接口要求请求头：
 
 ```text
-X-Internal-Token: local-dev-token
+X-Internal-Token: <RAG_INTERNAL_TOKEN>
 ```
 
-生产环境必须通过 `RAG_INTERNAL_TOKEN` 修改默认令牌，并限制 8001 端口只允许 Spring Boot 访问。
+必须显式配置至少32字节的 `RAG_INTERNAL_TOKEN`，与 Spring 的 `AI_RAG_INTERNAL_TOKEN` 一致。代码不提供默认令牌。Milvus 模式还须设置 `RAG_MILVUS_TOKEN=root:<MILVUS_ROOT_PASSWORD>`。根目录启动脚本会从根 `.env` 读取并传给服务；单独运行时需要先设置环境变量或本目录 `.env`。
 
 ## Milvus Standalone
 
 安装 Docker 后执行：
 
 ```powershell
-docker compose -f docker-compose.milvus.yml up -d
+docker compose -f ../../docker-compose.yml up -d
 .\.venv\Scripts\pip.exe install "pymilvus==2.6.17"
 $env:RAG_BACKEND="milvus"
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8001

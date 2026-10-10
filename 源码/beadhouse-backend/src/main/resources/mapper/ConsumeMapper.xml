@@ -14,6 +14,7 @@
         LEFT JOIN elder e ON e.id = c.elder_id
         <where>
             e.id IS NOT NULL
+            <include refid="com.shanzhu.beadhouse.dao.mapper.ElderMapper.assignmentScope"/>
             <if test="startTime != null">
                 AND c.consume_date &gt;= #{startTime}
             </if>

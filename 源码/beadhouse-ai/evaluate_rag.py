@@ -22,7 +22,10 @@ def main() -> int:
     root = Path(__file__).parent
     fixture = json.loads((root / "evals" / "policy_rag_cases.json").read_text(encoding="utf-8"))
     base_url = os.getenv("RAG_EVAL_URL", "http://127.0.0.1:8001").rstrip("/")
-    token = os.getenv("RAG_INTERNAL_TOKEN", "local-dev-token")
+    token = os.getenv("RAG_INTERNAL_TOKEN", "")
+    if not token:
+        print("Configure RAG_INTERNAL_TOKEN before running evaluation", file=sys.stderr)
+        return 2
     expected_backend = os.getenv("RAG_EXPECT_BACKEND", "")
     p95_limit = float(os.getenv("RAG_P95_MAX_MS", "5000"))
     run_id = str(time.time_ns())

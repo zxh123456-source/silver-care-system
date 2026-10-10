@@ -39,8 +39,8 @@ public class EntityCodeGeneratorUtil {
         DataSourceConfig dsc = new DataSourceConfig();
         dsc.setUrl("jdbc:mysql://127.0.0.1:3306/db_beadhouse?useSSL=false&useUnicode=true&characterEncoding=utf-8&serverTimezone=GMT%2B8");
         dsc.setDriverName("com.mysql.cj.jdbc.Driver");
-        dsc.setUsername("root");
-        dsc.setPassword("12345678");
+        dsc.setUsername(System.getenv("DB_USERNAME"));
+        dsc.setPassword(System.getenv("DB_PASSWORD"));
         dsc.setDbType(DbType.MYSQL); // 使用的是mysql
         mpg.setDataSource(dsc);
 

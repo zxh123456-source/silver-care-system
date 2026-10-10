@@ -6,7 +6,6 @@ interface ILoginForm {
 }
 
 interface ISendCodeForm {
-  pass: string
   account: string
 }
 
@@ -37,11 +36,7 @@ export function getLogin(data: ILoginForm) {
 
 // 发送验证码
 export async function sendCode(data: ISendCodeForm) {
-  return http.get('/api/account/sendCode', {
-    params: {
-      ...data
-    }
-  })
+  return http.post('/api/account/sendCode', data)
 }
 
 // 忘记密码

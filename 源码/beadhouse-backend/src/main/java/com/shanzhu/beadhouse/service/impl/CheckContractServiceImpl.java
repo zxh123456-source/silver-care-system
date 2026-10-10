@@ -34,6 +34,8 @@ import java.util.Objects;
 @Service
 public class CheckContractServiceImpl implements CheckContractService {
     @Resource
+    private com.shanzhu.beadhouse.service.common.AiDataScopeService dataScopeService;
+    @Resource
     private ElderMapper elderMapper;
     @Resource
     private ElderFunc elderFunc;
@@ -129,6 +131,7 @@ public class CheckContractServiceImpl implements CheckContractService {
             elderByIdNum = elder;
         } else {
             // 判断该老人状态
+            dataScopeService.assertElderAccess(elderByIdNum.getId());
             elderFunc.checkEnterOrExitAudit(elderByIdNum);
             // 老人状态为预定 && 老人预定床位编号和传入床位编号不相等
             boolean editFlag = Objects.equals(elderByIdNum.getCheckFlag(), CheckEnum.RESERVE.getStatus()) &&
@@ -165,6 +168,7 @@ public class CheckContractServiceImpl implements CheckContractService {
 
     @Override
     public Result getCheckContractById(Long elderId) {
+        dataScopeService.assertElderAccess(elderId);
         // 根据编号获取老人
         Elder elder = elderMapper.selectById(elderId);
         // 验证老人是否存在
@@ -188,6 +192,7 @@ public class CheckContractServiceImpl implements CheckContractService {
     @Override
     @Transactional
     public Result editCheckContract(OperateCheckContractQuery query) {
+        dataScopeService.assertElderAccess(query.getId());
         // 验证老人
         Elder elder = elderFunc.checkElder(query.getId(), query.getIdNum());
         // 若床位编号不一致
@@ -225,6 +230,7 @@ public class CheckContractServiceImpl implements CheckContractService {
     @Override
     @Transactional
     public Result deleteCheckContract(Long elderId) {
+        dataScopeService.assertElderAccess(elderId);
         // 验证老人
         Elder elder = elderFunc.checkElder(elderId, null);
         // 根据编号逻辑删除老人

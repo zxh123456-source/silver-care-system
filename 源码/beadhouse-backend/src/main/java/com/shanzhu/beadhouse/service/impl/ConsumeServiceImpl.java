@@ -17,6 +17,8 @@ import java.util.List;
 @Service
 public class ConsumeServiceImpl implements ConsumeService {
     @Resource
+    private com.shanzhu.beadhouse.service.common.AiDataScopeService dataScopeService;
+    @Resource
     private ConsumeMapper consumeMapper;
     @Resource
     private PageUtil pageUtil;
@@ -27,7 +29,7 @@ public class ConsumeServiceImpl implements ConsumeService {
         Date startTime = DateUtilWen.getDayStartTime(DateUtilWen.dateStrToDate(query.getStartTime()));
         Date endTime = DateUtilWen.getDayEndTime(DateUtilWen.dateStrToDate(query.getEndTime()));
         // 根据搜索关键字获取消费记录
-        List<PageConsumeByKeyVo> pageConsumeByKeyVoList = consumeMapper.listConsumeByKey(query.getElderName(), startTime, endTime);
+        List<PageConsumeByKeyVo> pageConsumeByKeyVoList = consumeMapper.listConsumeByKey(query.getElderName(), startTime, endTime, dataScopeService.queryStaffId());
         // 封装返回数据
         PageResult<PageConsumeByKeyVo> pageResult = pageUtil.packPageResultData(pageConsumeByKeyVoList, query.getPageNum(), query.getPageSize());
         return Result.success(pageResult);

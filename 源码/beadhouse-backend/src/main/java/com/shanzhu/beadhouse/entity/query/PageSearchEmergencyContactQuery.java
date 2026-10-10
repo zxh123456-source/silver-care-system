@@ -12,5 +12,5 @@ public class PageSearchEmergencyContactQuery {
     @ApiModelProperty(value = "条数", required = true, example = "1")
     private Integer pageSize;
     @ApiModelProperty(value = "老人编号", required = true, example = "1")
-    private String elderId;
+    private Long elderId;
 }

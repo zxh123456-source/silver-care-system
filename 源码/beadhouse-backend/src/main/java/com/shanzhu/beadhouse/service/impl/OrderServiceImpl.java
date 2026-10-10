@@ -32,6 +32,8 @@ import java.util.stream.Collectors;
 @Service
 public class OrderServiceImpl implements OrderService {
     @Resource
+    private com.shanzhu.beadhouse.service.common.AiDataScopeService dataScopeService;
+    @Resource
     private OrderMapper orderMapper;
     @Resource
     private OrderDishesFunc orderDishesFunc;
@@ -47,7 +49,7 @@ public class OrderServiceImpl implements OrderService {
     @Override
     public Result pageOrderByKey(PageOrderByKeyQuery query) {
         // 根据关键字查询点餐列表
-        List<PageOrderByKeyVo> pageOrderByKeyVoList = orderMapper.listOrderByKey(query);
+        List<PageOrderByKeyVo> pageOrderByKeyVoList = orderMapper.listOrderByKey(query, dataScopeService.queryStaffId());
         // 封装返回数据
         PageResult<PageOrderByKeyVo> pageResult = pageUtil.packPageResultData(pageOrderByKeyVoList, query.getPageNum(), query.getPageSize());
         // 格式化日期
@@ -71,6 +73,7 @@ public class OrderServiceImpl implements OrderService {
     @Override
     @Transactional
     public Result addOrder(AddOrderQuery query) {
+        dataScopeService.assertElderAccess(query.getElderId());
         // 根据老人编号获取该老人所选套餐的菜品列表
         List<Dishes> elderSetDishesList = dishesMapper.listSetDishesByElderId(query.getElderId());
         // 对所点菜品根据菜品编号进行分组
@@ -131,6 +134,9 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     public Result getOrderById(Long orderId) {
+        Order record = orderMapper.selectById(orderId);
+        AssertUtil.notNull(record, ExceptionEnum.DATA_NOT_EXIST);
+        dataScopeService.assertElderAccess(record.getElderId());
         // 根据订单编号获取订单信息
         GetOrderByIdVo getOrderByIdVo = orderMapper.getOrderById(orderId);
         // 判断是否为空
@@ -149,6 +155,8 @@ public class OrderServiceImpl implements OrderService {
     public Result sendOrder(SendOrderQuery query) {
         // 根据编号获取订单
         Order getOrderById = orderMapper.selectById(query.getId());
+        AssertUtil.notNull(getOrderById, ExceptionEnum.DATA_NOT_EXIST);
+        dataScopeService.assertElderAccess(getOrderById.getElderId());
         // 判断订单是否已完成
         boolean checkOrderFlag = ObjUtil.isNotEmpty(getOrderById.getStaffId()) ||
                 ObjUtil.isNotEmpty(getOrderById.getDeliverDishesDate()) ||
