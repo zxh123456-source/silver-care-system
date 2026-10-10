@@ -1,4 +1,9 @@
 import { http } from "@/utils";
+export function listCareAlerts(state: string) { return http.get("/api/ai/daily/alerts", { params: { state } }); }
+export function scanCareAlerts(date: string) { return http.post("/api/ai/daily/alerts/scan", null, { params: { date } }); }
+export function actCareAlert(action: "ack" | "resolve", data: { id: number; revision: number; note?: string }) {
+  return http.post(`/api/ai/daily/alerts/${action}`, data);
+}
 
 export function listDailyTasks(date: string, state: string) {
   return http.get("/api/ai/daily/tasks", { params: { date, state } });

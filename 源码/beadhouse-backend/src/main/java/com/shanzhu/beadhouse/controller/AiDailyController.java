@@ -21,6 +21,22 @@ public class AiDailyController {
     private AiDailyService dailyService;
     @Resource
     private com.shanzhu.beadhouse.service.common.DailyTaskService taskService;
+    @Resource
+    private com.shanzhu.beadhouse.service.common.CareAlertService alerts;
+
+    @GetMapping("/alerts")
+    public Result alerts(@RequestParam(defaultValue="ACTIVE") String state,@RequestHeader String token) {
+        return alerts.list(state);
+    }
+    @PostMapping("/alerts/scan")
+    public Result scanAlerts(@RequestParam(required=false) @DateTimeFormat(pattern="yyyy-MM-dd") Date date,
+                             @RequestHeader String token) { return alerts.scan(date); }
+    @PostMapping("/alerts/ack")
+    public Result acknowledgeAlert(@RequestBody com.shanzhu.beadhouse.entity.query.DailyTaskActionQuery query,
+                                   @RequestHeader String token) { return alerts.act("ack",query); }
+    @PostMapping("/alerts/resolve")
+    public Result resolveAlert(@RequestBody com.shanzhu.beadhouse.entity.query.DailyTaskActionQuery query,
+                               @RequestHeader String token) { return alerts.act("resolve",query); }
 
     @PostMapping("/tasks/sync")
     public Result syncTasks(@RequestParam(required=false) @DateTimeFormat(pattern="yyyy-MM-dd") Date date,

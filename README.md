@@ -43,6 +43,26 @@ Milvus 已启用认证，MinIO 用户和密码同时传给 MinIO 与 Milvus 存�
 
 详细功能和验收方法见 [AI护理工作台使用说明.md](./AI护理工作台使用说明.md)。
 
+## 健康与用药告警
+
+新增健康测量时，在同一事务中比较当前填写指标与最近历史记录（最多90条），触发已有变化阈值后保存 HEALTH_CHANGE 告警；只填写体重不会重新触发旧体温变化。此功能只描述数据变化，不作诊断。用药登记 SKIPPED 自动保存 MEDICATION_SKIPPED 告警，改为 DONE 后自动解除对应用药告警。
+
+每日助手新增告警区。历史用药核对需显式选择过去31天内的日期并点击核对；没有执行登记的计划/时段保存 MEDICATION_UNRECORDED，表示“缺少记录待核对”，不能认定老人实际漏服。当日或未来日期不允许扫描为漏登记告警。当前没有后台定时扫描或短信/邮件通知。
+
+告警按测量记录或用药日期/计划/时段去重。相同证据重复核对保留确认/解除状态，证据变化才重新打开告警。告警同时关联协作任务；若旧任务已完成，新证据使用新的任务键，保留旧任务结果。解除告警不会修改测量、用药执行、余额或自动完成协作任务。
+
+人工流程为待确认 → 已确认 → 已解除，解除需要1至500字依据，仅确认人或超级管理员可解除。版本冲突返回409；所有查询和操作沿用老人数据范围。服务对原记录与告警实行事务提交；告警写入失败时，原测量/登记也回滚，避免丢失提醒。
+
+已有环境需先执行 `数据库/care_alert_upgrade.sql`（并确保每日任务迁移已执行）。新 Docker 数据卷会自动执行四份初始化脚本。PowerShell：
+
+```powershell
+Get-Content -Raw -Encoding UTF8 数据库/care_alert_upgrade.sql | docker compose exec -T mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" db_beadhouse'
+```
+
+接口：`GET /ai/daily/alerts?state=ACTIVE`、`POST /ai/daily/alerts/scan?date=yyyy-MM-dd`、`POST /ai/daily/alerts/ack`、`POST /ai/daily/alerts/resolve`。确认/解除提交 `id`、`revision`，解除附 `note`。返回 `sourceId`、`alertKey` 与 `taskKey` 供追踪原记录及关联任务。
+
+真实集成回归额外设置 `ALERT_HTTP_TEST=true`，仅允许指向可丢弃测试数据库；测试会模拟告警表不可用，以验证原业务回滚。
+
 ## 每日协作任务
 
 每日助手新增协作任务区。点击“同步当日事项为任务”后才写入任务快照；刷新与 GET 汇总仍只读。认领、转交、复核完成均为显式操作。无分配员工看不到任务；认领人来自登录会话，转交人必须在职并拥有老人及每日助手权限。只有负责人或超级管理员可转交/完成，完成须填写复核结果。

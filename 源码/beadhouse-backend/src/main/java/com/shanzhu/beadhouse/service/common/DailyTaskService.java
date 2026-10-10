@@ -100,7 +100,7 @@ public class DailyTaskService {
                 return Result.error(400,"请填写不超过500字的复核结果");
             task.setCompletionNote(query.getNote().trim()); task.setCompletedAt(new Date()); task.setState("DONE");
         } else return Result.error(400,"任务操作不合法");
-        task.setRevision(task.getRevision()+1); taskMapper.updateById(task);
+        task.setRevision(task.getRevision()+1); task.setUpdateTime(new Date()); taskMapper.updateById(task);
         audit.record("每日任务",action,"ai_daily_task",task.getId(),null);
         return Result.success(task);
     }

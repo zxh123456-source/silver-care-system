@@ -15,6 +15,35 @@
     <el-card class="task-center" shadow="never">
       <template #header>
         <div class="table-toolbar">
+          <span>健康与用药告警（最多200条）</span>
+          <div class="actions">
+            <el-select v-model="alertState" style="width:130px" @change="load">
+              <el-option label="未解除" value="ACTIVE" /><el-option label="待确认" value="OPEN" />
+              <el-option label="已确认" value="ACKNOWLEDGED" /><el-option label="已解除" value="RESOLVED" />
+              <el-option label="全部" value="ALL" />
+            </el-select>
+            <el-button :loading="alertBusy" :disabled="selectedDate >= currentDay" @click="scanAlerts">核对所选历史用药</el-button>
+          </div>
+        </div>
+      </template>
+      <el-alert title="测量变化和已登记未执行会自动保存告警并关联任务。历史缺少执行登记只表示需核对，不能据此认定漏服。解除告警不会修改用药或测量记录。" type="warning" :closable="false" />
+      <el-table :data="alerts" stripe empty-text="暂无告警；历史用药核对需选择过去日期">
+        <el-table-column prop="elderName" label="老人" width="100" />
+        <el-table-column label="类别" width="130"><template #default="scope">{{ alertKind(scope.row.kind) }}</template></el-table-column>
+        <el-table-column prop="detail" label="来源证据" min-width="260" show-overflow-tooltip />
+        <el-table-column label="状态" width="100"><template #default="scope">{{ alertStatus(scope.row.state) }}</template></el-table-column>
+        <el-table-column prop="createTime" label="首次发现" width="165" />
+        <el-table-column prop="resolutionNote" label="解除依据" min-width="170" show-overflow-tooltip />
+        <el-table-column label="操作" width="180"><template #default="scope">
+          <el-button link type="primary" @click="go(scope.row.kind === 'HEALTH_CHANGE' ? '/ai-care/health' : '/ai-care/medication')">原记录</el-button>
+          <el-button v-if="scope.row.state === 'OPEN'" link type="primary" :disabled="alertBusy" @click="ackAlert(scope.row)">确认</el-button>
+          <el-button v-if="scope.row.state === 'ACKNOWLEDGED'" link type="success" :disabled="alertBusy" @click="resolveAlert(scope.row)">解除</el-button>
+        </template></el-table-column>
+      </el-table>
+    </el-card>
+    <el-card class="task-center" shadow="never">
+      <template #header>
+        <div class="table-toolbar">
           <span>协作任务（截至所选日期，最多200条）</span>
           <div class="actions">
             <el-select v-model="taskState" style="width:130px" @change="load">
@@ -81,7 +110,7 @@
 import { computed, onActivated, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { getDailyOverview, listDailyTasks, syncDailyTasks, dailyTaskOwners, actDailyTask } from "@/apis/aiDaily";
+import { getDailyOverview, listDailyTasks, syncDailyTasks, dailyTaskOwners, actDailyTask, listCareAlerts, scanCareAlerts, actCareAlert } from "@/apis/aiDaily";
 
 const pad = (value: number) => String(value).padStart(2, "0");
 const now = new Date();
@@ -97,6 +126,39 @@ const transferVisible = ref(false);
 const transferRow = ref<any>(null);
 const targetStaffId = ref<number>();
 const eligibleOwners = ref<any[]>([]);
+const currentDay = selectedDate.value;
+const alerts = ref<any[]>([]);
+const alertState = ref("ACTIVE");
+const alertBusy = ref(false);
+function alertKind(kind: string) { return kind === "HEALTH_CHANGE" ? "健康变化" : kind === "MEDICATION_SKIPPED" ? "已登记未执行" : "缺少执行登记"; }
+function alertStatus(state: string) { return state === "RESOLVED" ? "已解除" : state === "ACKNOWLEDGED" ? "已确认" : "待确认"; }
+async function scanAlerts() {
+  alertBusy.value = true;
+  try {
+    const res: any = await scanCareAlerts(selectedDate.value);
+    if (res.code !== 200) return ElMessage.warning(res.msg);
+    ElMessage.success(res.msg); await load();
+  } finally { alertBusy.value = false; }
+}
+async function alertAction(action: "ack" | "resolve", row: any, note?: string) {
+  alertBusy.value = true;
+  try {
+    const res: any = await actCareAlert(action, { id: row.id, revision: row.revision, note });
+    if (res.code !== 200) ElMessage.warning(res.msg); else ElMessage.success("告警已更新");
+    await load();
+  } finally { alertBusy.value = false; }
+}
+async function ackAlert(row: any) { await alertAction("ack", row); }
+async function resolveAlert(row: any) {
+  let note = "";
+  try {
+    const result = await ElMessageBox.prompt("请填写人工核对结果和解除依据。", "解除告警", {
+      inputValidator: (value: string) => (!!value?.trim() && value.length <= 500) || "请填写1至500字的解除依据"
+    });
+    note = result.value;
+  } catch { return; }
+  await alertAction("resolve", row, note);
+}
 
 function taskStatus(state: string) { return state === "DONE" ? "已完成" : state === "CLAIMED" ? "已认领" : "待认领"; }
 async function syncTasks() {
@@ -157,9 +219,10 @@ const filteredItems = computed(() => {
 async function load() {
   loading.value = true;
   try {
-    const [res, taskRes]: any[] = await Promise.all([getDailyOverview(selectedDate.value), listDailyTasks(selectedDate.value, taskState.value)]);
+    const [res, taskRes, alertRes]: any[] = await Promise.all([getDailyOverview(selectedDate.value), listDailyTasks(selectedDate.value, taskState.value), listCareAlerts(alertState.value)]);
     if (res.code !== 200) ElMessage.warning(res.msg); else overview.value = res.data;
     if (taskRes.code !== 200) ElMessage.warning(taskRes.msg); else tasks.value = taskRes.data || [];
+    if (alertRes.code !== 200) ElMessage.warning(alertRes.msg); else alerts.value = alertRes.data || [];
   }
   finally { loading.value = false; }
 }

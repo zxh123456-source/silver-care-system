@@ -19,6 +19,7 @@ services:
       - ./数据库/db_beadhouse.sql:/docker-entrypoint-initdb.d/01-db_beadhouse.sql:ro
       - ./数据库/ai_care_upgrade.sql:/docker-entrypoint-initdb.d/02-ai_care_upgrade.sql:ro
       - ./数据库/daily_task_upgrade.sql:/docker-entrypoint-initdb.d/03-daily_task_upgrade.sql:ro
+      - ./数据库/care_alert_upgrade.sql:/docker-entrypoint-initdb.d/04-care_alert_upgrade.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
       interval: 5s

@@ -38,4 +38,12 @@ class HealthChangeDetectorTest {
 
         assertThat(reminders).contains("体温由 36.5 变为 37.7℃", "空腹血糖由 5.2 变为 8.0mmol/L");
     }
+
+    @Test
+    void currentPartialMeasurementDoesNotReemitOldTemperatureChange() {
+        HealthData first=new HealthData(); first.setTemperature(36.0);
+        HealthData changed=new HealthData(); changed.setTemperature(38.0);
+        HealthData current=new HealthData(); current.setWeight(65.0);
+        assertThat(detector.detectCurrent(Arrays.asList(first,changed,current),current)).isEmpty();
+    }
 }
