@@ -27,5 +27,6 @@ public interface ConsumeMapper extends BaseMapper<Consume> {
      */
     List<PageConsumeByKeyVo> listConsumeByKey(@Param("elderName") String elderName,
                                               @Param("startTime") Date startTime,
-                                              @Param("endTime") Date endTime);
+                                              @Param("endTime") Date endTime,
+                                              @Param("scopeStaffId") Long scopeStaffId);
 }

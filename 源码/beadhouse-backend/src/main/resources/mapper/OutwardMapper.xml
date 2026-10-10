@@ -14,6 +14,7 @@
         LEFT JOIN elder e ON e.id = o.elder_id
         <where>
             o.del_flag = 'N'
+            <include refid="com.shanzhu.beadhouse.dao.mapper.ElderMapper.assignmentScope"/>
             <if test="keyQuery.chaperoneType != null and keyQuery.chaperoneType != '' and keyQuery.chaperoneType != 'null'">
                 AND o.chaperone_type = #{keyQuery.chaperoneType}
             </if>

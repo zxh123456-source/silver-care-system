@@ -14,6 +14,7 @@
         LEFT JOIN staff s ON s.id = a.staff_id
         <where>
             a.del_flag = 'N'
+            <include refid="com.shanzhu.beadhouse.dao.mapper.ElderMapper.assignmentScope"/>
             <if test="keyQuery.elderName != null and keyQuery.elderName != '' and keyQuery.elderName != 'null'">
                 AND e.name LIKE concat('%', #{keyQuery.elderName,jdbcType=VARCHAR}, '%')
             </if>

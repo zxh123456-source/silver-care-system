@@ -28,6 +28,8 @@ import java.util.stream.Collectors;
 @Service
 public class IntentionServiceImpl implements IntentionService {
     @Resource
+    private com.shanzhu.beadhouse.service.common.AiDataScopeService dataScopeService;
+    @Resource
     private CommonFunc commonFunc;
     @Resource
     private ElderMapper elderMapper;
@@ -138,6 +140,7 @@ public class IntentionServiceImpl implements IntentionService {
             elderMapper.insert(elder);
         } else {
             // 判断该老人状态
+            dataScopeService.assertElderAccess(elderByIdNum.getId());
             elderFunc.checkIntention(elderByIdNum);
             // 封装修改
             Elder elder = BeanUtil.toBean(query, Elder.class);
@@ -150,6 +153,7 @@ public class IntentionServiceImpl implements IntentionService {
 
     @Override
     public Result getIntentById(Long elderId) {
+        dataScopeService.assertElderAccess(elderId);
         // 根据编号获取意向客户
         Elder elder = elderMapper.selectById(elderId);
         // 判断是否为空
@@ -164,6 +168,7 @@ public class IntentionServiceImpl implements IntentionService {
 
     @Override
     public Result editIntention(OperateIntentionQuery query) {
+        dataScopeService.assertElderAccess(query.getId());
         // 验证老人
         elderFunc.checkElder(query.getId(), query.getIdNum());
         // 封装修改

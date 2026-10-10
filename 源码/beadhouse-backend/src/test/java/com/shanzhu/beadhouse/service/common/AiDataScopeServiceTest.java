@@ -15,6 +15,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
@@ -49,5 +50,22 @@ class AiDataScopeServiceTest {
         when(authorityAssert.getLoginUserInfo()).thenReturn(user);
 
         assertThatCode(() -> service.assertElderAccess(17L)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void queryScopeUsesServerIdentityAndAdminAloneGetsUnrestrictedScope() {
+        LoginUserVo user = new LoginUserVo(); user.setId(4L); user.setRoleId(5L);
+        when(authorityAssert.getLoginUserInfo()).thenReturn(user);
+        when(authorityAssert.getLoginUserId()).thenReturn(4L);
+        assertThat(service.queryStaffId()).isEqualTo(4L);
+        user.setRoleId(1L);
+        assertThat(service.queryStaffId()).isNull();
+    }
+
+    @Test
+    void anonymousQueriesAndRecordReadsAreRejected() {
+        when(authorityAssert.getLoginUserInfo()).thenReturn(null);
+        assertThatThrownBy(() -> service.queryStaffId()).isInstanceOf(BusinessRuntimeException.class);
+        assertThatThrownBy(() -> service.assertElderAccess(17L)).isInstanceOf(BusinessRuntimeException.class);
     }
 }

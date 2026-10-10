@@ -25,6 +25,8 @@ import java.util.List;
 @Service
 public class AccidentServiceImpl implements AccidentService {
     @Resource
+    private com.shanzhu.beadhouse.service.common.AiDataScopeService dataScopeService;
+    @Resource
     private AccidentMapper accidentMapper;
     @Resource
     private AccidentFunc accidentFunc;
@@ -34,7 +36,7 @@ public class AccidentServiceImpl implements AccidentService {
     @Override
     public Result pageAccidentByKey(PageAccidentByKeyQuery query) {
         // 根据关键字获取事故登记列表
-        List<PageAccidentByKeyVo> pageAccidentByKeyVoList = accidentMapper.listAccidentByKeyVo(query);
+        List<PageAccidentByKeyVo> pageAccidentByKeyVoList = accidentMapper.listAccidentByKeyVo(query, dataScopeService.queryStaffId());
         // 封装返回数据
         PageResult<PageAccidentByKeyVo> pageResult = pageUtil.packPageResultData(pageAccidentByKeyVoList, query.getPageNum(), query.getPageSize());
         return Result.success(pageResult);
@@ -42,6 +44,7 @@ public class AccidentServiceImpl implements AccidentService {
 
     @Override
     public Result addAccident(AddAccidentQuery query) {
+        dataScopeService.assertElderAccess(query.getElderId());
         // 初始化事故登记
         query.setId(null);
         Accident accident = BeanUtil.toBean(query, Accident.class);
@@ -54,6 +57,9 @@ public class AccidentServiceImpl implements AccidentService {
 
     @Override
     public Result getAccidentById(Long accidentId) {
+        Accident record = accidentMapper.selectById(accidentId);
+        AssertUtil.notNull(record, ExceptionEnum.DATA_NOT_EXIST);
+        dataScopeService.assertElderAccess(record.getElderId());
         // 根据编号获取事故登记
         GetAccidentByIdVo accidentById = accidentMapper.getAccidentById(accidentId);
         // 验证事故登记是否存在
@@ -65,6 +71,7 @@ public class AccidentServiceImpl implements AccidentService {
     public Result editAccident(EditAccidentQuery query) {
         // 验证事故登记
         Accident accident = accidentFunc.checkAccident(query.getId(), false);
+        dataScopeService.assertElderAccess(accident.getElderId());
         // 封装修改
         BeanUtil.copyProperties(query, accident);
         accident.setOccurDate(DateUtilWen.dateStrToDate(query.getOccurDate()));
@@ -77,6 +84,7 @@ public class AccidentServiceImpl implements AccidentService {
     public Result deleteAccident(Long accidentId) {
         // 验证事故登记
         Accident accident = accidentFunc.checkAccident(accidentId, true);
+        dataScopeService.assertElderAccess(accident.getElderId());
         // 封装修改
         accident.setDelFlag(YesNoEnum.YES.getCode());
         // 修改
