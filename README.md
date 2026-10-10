@@ -43,6 +43,24 @@ Milvus 已启用认证，MinIO 用户和密码同时传给 MinIO 与 Milvus 存�
 
 详细功能和验收方法见 [AI护理工作台使用说明.md](./AI护理工作台使用说明.md)。
 
+## 每日协作任务
+
+每日助手新增协作任务区。点击“同步当日事项为任务”后才写入任务快照；刷新与 GET 汇总仍只读。认领、转交、复核完成均为显式操作。无分配员工看不到任务；认领人来自登录会话，转交人必须在职并拥有老人及每日助手权限。只有负责人或超级管理员可转交/完成，完成须填写复核结果。
+
+任务按来源去重：护理跟进和服务预约跨日期沿用同一任务，用药按日期/计划/时段独立，健康复核按测量记录独立。同步不会清空负责人或重开已完成任务。并发认领由 MySQL 行锁串行处理，旧版本修改返回409。已完成任务的重复完成请求幂等；原业务事项后来发生变化，需要工作人员重新核对，任务不会自动替代原业务状态。
+
+协作截止时间默认来源时间加24小时，逾期依据当前时间计算；完成后解除逾期展示。该截止时间不是医嘱服药时间。任务列表默认显示未完成，最多200条，保留历史任务便于追踪。此版本支持逾期展示与人工闭环，尚无短信/邮件升级提醒。
+
+已有数据库需执行 `数据库/daily_task_upgrade.sql`；新建 Docker MySQL 数据卷会自动执行。PowerShell 可在项目根目录执行：
+
+```powershell
+Get-Content -Raw -Encoding UTF8 数据库/daily_task_upgrade.sql | docker compose exec -T mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" db_beadhouse'
+```
+
+接口：`GET /ai/daily/tasks?state=ACTIVE&date=yyyy-MM-dd`、`POST /ai/daily/tasks/sync?date=yyyy-MM-dd`、`GET /ai/daily/tasks/owners?id=任务编号`、`POST /ai/daily/tasks/claim|transfer|complete`。操作提交 `id` 和 `revision`，转交附 `targetStaffId`，完成附 `note`。日常启动不会自动修改已有数据库结构。
+
+真实 HTTP 并发回归需在可丢弃库执行三份初始化脚本，并设置 `DAILY_HTTP_TEST=true` 及前述 MySQL/Redis 测试变量。此测试会写入测试账号与业务样例，不可使用日常或生产数据库。
+
 ## 传统业务老人数据范围
 
 老人分配沿用 `elder_staff_assignment`。超级管理员访问全部数据；普通员工还需同时具备原模块菜单权限和该老人启用中的分配。无分配时列表及导出为空，越权详情/写入返回业务码403。分配撤销后下一次请求立即生效，无需重新登录。

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.shanzhu.beadhouse.dao.mapper.DailyTaskMapper">
+    <insert id="upsertSnapshot">
+        INSERT INTO ai_daily_task(task_key,task_date,elder_id,source_id,category,title,detail,target_path,due_at)
+        VALUES(#{task.taskKey},#{task.taskDate},#{task.elderId},#{task.sourceId},#{task.category},
+               #{task.title},#{task.detail},#{task.targetPath},#{task.dueAt})
+        ON DUPLICATE KEY UPDATE
+            category=IF(state='DONE',category,VALUES(category)),
+            title=IF(state='DONE',title,VALUES(title)),
+            detail=IF(state='DONE',detail,VALUES(detail)),
+            revision=IF(state='DONE',revision,revision+1)
+    </insert>
+    <select id="lockById" resultType="com.shanzhu.beadhouse.entity.po.DailyTask">
+        SELECT * FROM ai_daily_task WHERE id=#{id} FOR UPDATE
+    </select>
+    <select id="eligibleOwners" resultType="com.shanzhu.beadhouse.entity.base.DropDown">
+        SELECT s.id,s.name FROM staff s WHERE s.leave_flag='N'
+        AND (s.role_id=#{adminRoleId} OR EXISTS(
+            SELECT 1 FROM elder_staff_assignment a WHERE a.staff_id=s.id AND a.elder_id=#{elderId} AND a.active='Y'))
+        AND EXISTS(SELECT 1 FROM role_auth ra JOIN auth au ON au.id=ra.auth_id
+                   WHERE ra.role_id=s.role_id AND au.url='/ai/daily/index')
+        ORDER BY s.id
+    </select>
+</mapper>
