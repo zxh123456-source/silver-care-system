@@ -26,4 +26,4 @@ $lines = foreach ($line in Get-Content -LiteralPath (Join-Path $PSScriptRoot '.e
     } else { $line }
 }
 [IO.File]::WriteAllLines($target, [string[]]$lines, (New-Object Text.UTF8Encoding $false))
-Write-Host '已生成本地随机密钥到 .env（Git 已忽略）。已有演示 AES 账号需另外配置历史 IV/密钥。'
+Write-Host '已生成本地随机密钥到 .env（Git 已忽略）。首次导入演示库后，运行 初始化演示账号.ps1 获取管理员登录凭据。'

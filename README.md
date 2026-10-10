@@ -13,13 +13,25 @@
 
 ## 本地准备
 
-1. 准备 JDK 8、Node.js、Python 3.12 和 Docker Desktop，不需要单独安装 MySQL 或 Redis。
+1. 准备 JDK 8、Maven 3、Node.js、Python 3.12、PowerShell 7 和 Docker Desktop，不需要单独安装 MySQL 或 Redis。
 2. 首次运行 `初始化本地配置.ps1`，生成已被 Git 忽略的 `.env`，其中数据库、Redis、JWT、MinIO、Milvus、RAG 密钥均独立随机生成。已有 `.env` 时脚本拒绝覆盖，也可以手动参考 `.env.example` 配置。
-3. 安装前端、后端和 `源码/beadhouse-ai/README.md` 中列出的依赖。
-4. 运行 `启动AI养老院.ps1`。脚本会启动 Docker 基础设施，再启动本机 Spring Boot、FastAPI 和 Vue。
-5. 访问 `http://127.0.0.1:8080`。
+3. 在下面三个目录分别执行依赖安装和构建（终端需能找到 `java`、`mvn`、`node`、`npm`、`python`、`docker`；后端设置 `JAVA_HOME` 指向 JDK 8）：
 
-MySQL 容器首次创建数据卷时会依次导入 `数据库/db_beadhouse.sql` 和 `数据库/ai_care_upgrade.sql`。演示库里的身份信息与联系方式均为虚构测试数据。已有数据卷不会重复初始化；需要重新初始化时应先自行备份，再显式删除对应 Docker volume。
+```powershell
+# 源码/beadhouse-backend
+mvn package -DskipTests
+# 源码/beadhouse-frontend
+npm ci
+# 源码/beadhouse-ai
+python -m venv .venv
+.\.venv\Scripts\pip.exe install -r requirements.txt
+```
+
+4. 回到根目录执行 `docker compose up -d --wait`，等待首次导入完成。
+5. 仅首次导入虚构演示库时执行 `./初始化演示账号.ps1`。脚本仅转换原始演示管理员为随机 BCrypt 密码，登录凭据写入被 Git 忽略的 `.runtime/demo-accounts.txt`；重复执行不会覆盖已改过的密码。不需要旧 AES 密钥。其他旧演示员工不会被重置，仍需历史 AES 配置；也可由管理员新增演示员工并分配角色和老人。
+6. 运行 `./启动AI养老院.ps1`。脚本会启动 Docker 基础设施，再启动本机 Spring Boot、FastAPI 和 Vue，访问 `http://127.0.0.1:8080`。
+
+MySQL 容器首次创建数据卷时会依次导入演示库、AI、每日任务和告警四份 SQL。演示库里的身份信息与联系方式均为虚构测试数据。已有数据卷不会重复初始化：先备份，再执行根目录 `./升级数据库.ps1`，按顺序应用三份增量迁移。该脚本不会导入会覆盖历史数据的 `db_beadhouse.sql`。迁移可重复执行，但 MySQL DDL 不能整体回滚，失败时需依据备份和报错处理。不要通过删除已有数据卷来升级。
 
 MySQL 容器内部端口为 `3306`，宿主机映射为 `127.0.0.1:3308`，避免与电脑上已有的 MySQL 服务冲突。Spring Boot 默认连接 3308。
 
@@ -29,7 +41,7 @@ MySQL 容器内部端口为 `3306`，宿主机映射为 `127.0.0.1:3308`，避�
 
 Milvus 已启用认证，MinIO 用户和密码同时传给 MinIO 与 Milvus 存储客户端。根 Compose 和旧 `docker-compose.milvus.yml` 入口共用一套配置，要求 Docker Compose 2.23.1 或更新版本（支持内联 configs）。
 
-历史演示数据库的 staff 密码仍是旧 AES 密文，导入后登录需要另外提供原来的 `LEGACY_AES_IV`/`LEGACY_AES_KEY`，通过本地配置安全分享；新账号使用 BCrypt。不要把 JWT 密钥用作 AES 密钥，也不要生成新的 AES 密钥尝试解密旧密码。旧账号成功登录后自动升级 BCrypt。
+已有业务库的旧 AES 账号仍需原 `LEGACY_AES_IV`/`LEGACY_AES_KEY` 才能登录，通过本地配置安全分享。不要把 JWT 密钥用作 AES 密钥，也不要生成新的 AES 密钥尝试解密旧密码。旧账号成功登录后自动升级 BCrypt。演示管理员初始化工具仅适用于原始虚构种子账号，不能用于恢复其他业务库的密码。
 
 已有 Docker 数据卷中的 MySQL 和 Milvus 密码不会因修改 `.env` 自动轮换：必须先使用原凭据完成服务内密码变更，再同步客户端配置。不要重新生成 `.env` 或删除数据卷来处理登录失败。JWT 轮换会使旧会话失效，RAG 内部令牌轮换后需同时重启两端服务。
 
@@ -42,6 +54,7 @@ Milvus 已启用认证，MinIO 用户和密码同时传给 MinIO 与 Milvus 存�
 - 提交前检查 `git status`，确认没有 `.runtime`、`.env`、数据库数据文件和账号文件。
 
 详细功能和验收方法见 [AI护理工作台使用说明.md](./AI护理工作台使用说明.md)。
+本轮实际检查结果和未覆盖范围见 [协作验收记录.md](./协作验收记录.md)。
 
 ## 健康与用药告警
 
@@ -79,7 +92,7 @@ Get-Content -Raw -Encoding UTF8 数据库/daily_task_upgrade.sql | docker compos
 
 接口：`GET /ai/daily/tasks?state=ACTIVE&date=yyyy-MM-dd`、`POST /ai/daily/tasks/sync?date=yyyy-MM-dd`、`GET /ai/daily/tasks/owners?id=任务编号`、`POST /ai/daily/tasks/claim|transfer|complete`。操作提交 `id` 和 `revision`，转交附 `targetStaffId`，完成附 `note`。日常启动不会自动修改已有数据库结构。
 
-真实 HTTP 并发回归需在可丢弃库执行三份初始化脚本，并设置 `DAILY_HTTP_TEST=true` 及前述 MySQL/Redis 测试变量。此测试会写入测试账号与业务样例，不可使用日常或生产数据库。
+真实 HTTP 并发回归需在可丢弃库执行四份初始化脚本，并设置 `DAILY_HTTP_TEST=true` 及前述 MySQL/Redis 测试变量。此测试会写入测试账号与业务样例，不可使用日常或生产数据库。
 
 ## 传统业务老人数据范围
 
