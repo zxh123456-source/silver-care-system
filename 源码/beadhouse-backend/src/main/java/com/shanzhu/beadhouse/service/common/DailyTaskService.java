@@ -33,6 +33,8 @@ public class DailyTaskService {
         Result overview=dailyService.overview(requestedDate);
         if (overview.getCode()!=200) return overview;
         DailyCareOverviewVo data=(DailyCareOverviewVo)overview.getData();
+        if (Boolean.TRUE.equals(data.getTruncated()))
+            return Result.error(409,"来源事项超过展示上限，本次未同步任何任务；请先在原业务处理积压事项后重试");
         Date day=parseDay(data.getDate());
         for(DailyCareItemVo item:data.getItems()) {
             scope.assertElderAccess(item.getElderId());

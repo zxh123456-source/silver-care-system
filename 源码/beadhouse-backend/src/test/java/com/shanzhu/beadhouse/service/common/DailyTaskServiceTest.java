@@ -90,4 +90,20 @@ class DailyTaskServiceTest {
         assertThat(keys).containsExactly("care-10","2026-10-08-med-10-早","health-10",
             "care-10","2026-10-09-med-10-早","health-11");
     }
+    @Test void truncatedOverviewCannotPartiallySyncOrReportSuccess() {
+        com.shanzhu.beadhouse.entity.vo.DailyCareOverviewVo overview=new com.shanzhu.beadhouse.entity.vo.DailyCareOverviewVo();
+        overview.setDate("2026-10-12"); overview.setTruncated(true); overview.setAttentionCount(201);
+        List<com.shanzhu.beadhouse.entity.vo.DailyCareItemVo> items=new ArrayList<>();
+        for(long id=1;id<=200;id++) {
+            com.shanzhu.beadhouse.entity.vo.DailyCareItemVo item=new com.shanzhu.beadhouse.entity.vo.DailyCareItemVo();
+            item.setKey("care-"+id); item.setSourceId(id); item.setElderId(4L); item.setCategory("CARE_FOLLOW_UP");
+            items.add(item);
+        }
+        overview.setItems(items);
+        when(dailyService.overview(any())).thenReturn(com.shanzhu.beadhouse.entity.base.Result.success(overview));
+        com.shanzhu.beadhouse.entity.base.Result response=service.sync(new Date());
+        assertThat(response.getCode()).isEqualTo(409);
+        assertThat(response.getMsg()).contains("未同步");
+        verifyNoInteractions(taskMapper,scope,audit);
+    }
 }

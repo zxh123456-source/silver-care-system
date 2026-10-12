@@ -85,7 +85,7 @@
           <el-radio-button label="HEALTH_CHANGE">健康</el-radio-button>
           <el-radio-button label="SERVICE_BACKLOG">预约</el-radio-button>
         </el-radio-group>
-        <el-tag v-if="overview.truncated" type="warning">任务过多，仅显示前 200 条</el-tag>
+        <el-tag v-if="overview.truncated" type="warning">来源过多，仅展示部分事项；请前往原业务核对</el-tag>
       </div>
       <el-table :data="filteredItems" stripe empty-text="当前没有需要关注的事项">
         <el-table-column prop="elderName" label="老人" width="100" />

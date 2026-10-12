@@ -139,7 +139,8 @@ public class AiDailyServiceImpl implements AiDailyService {
         QueryWrapper<NurseReserve> reserveListQuery = new QueryWrapper<NurseReserve>()
                 .eq("order_flag", YesNoEnum.NO.getCode()).orderByAsc("create_time", "id").last("LIMIT 50");
         dataScopeService.applyElderScope(reserveListQuery, "elder_id");
-        for (NurseReserve reserve : nurseReserveMapper.selectList(reserveListQuery)) {
+        List<NurseReserve> reservations = nurseReserveMapper.selectList(reserveListQuery);
+        for (NurseReserve reserve : reservations) {
             items.add(item("reserve-" + reserve.getId(), "SERVICE_BACKLOG", "NORMAL", reserve.getId(), reserve.getElderId(),
                     reserve.getCreateTime(), "未完成服务预约", reserve.getServiceName(), "PENDING", "/serve/book",
                     "前往服务预定页核对；执行会扣费并生成消费记录"));
@@ -147,8 +148,8 @@ public class AiDailyServiceImpl implements AiDailyService {
 
         fillElderNames(items);
         items.sort(Comparator.comparingInt(this::priority).thenComparing(item -> item.getEventTime() == null ? new Date(0) : item.getEventTime()));
-        boolean truncated = items.size() > MAX_ITEMS;
-        if (truncated) items = new ArrayList<>(items.subList(0, MAX_ITEMS));
+        boolean truncated = items.size() > MAX_ITEMS || serviceBacklogCount > reservations.size();
+        if (items.size() > MAX_ITEMS) items = new ArrayList<>(items.subList(0, MAX_ITEMS));
 
         DailyCareOverviewVo result = new DailyCareOverviewVo();
         result.setDate(new SimpleDateFormat("yyyy-MM-dd").format(day));

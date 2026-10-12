@@ -23,6 +23,29 @@ class DailyTaskHttpIntegrationTest {
     @Autowired JdbcTemplate jdbc;
     @Autowired TestRestTemplate http;
 
+    @Test void moreThan200SourcesExplicitlyRejectSyncWithoutCreatingPartialTasks() {
+        String password="overflow-test-login-only";
+        jdbc.update("UPDATE staff SET pass=? WHERE id=1",new BCryptPasswordEncoder().encode(password));
+        String admin=login(1,password);
+        String marker="overflow-"+UUID.randomUUID();
+        List<Object[]> sources=new ArrayList<>();
+        for(int i=0;i<201;i++) sources.add(new Object[]{marker});
+        jdbc.batchUpdate("INSERT INTO care_note(elder_id,staff_id,event_time,source_text,follow_up,status,ai_generated) VALUES(4,1,DATE_SUB(NOW(),INTERVAL 1 DAY),?,'请人工复核','PENDING','N')",sources);
+        try {
+            long before=jdbc.queryForObject("SELECT COUNT(*) FROM ai_daily_task",Long.class);
+            JsonNode overview=call(HttpMethod.GET,"/ai/daily/overview",admin,null); ok(overview);
+            assertThat(overview.path("data").path("items").size()).isEqualTo(200);
+            assertThat(overview.path("data").path("truncated").asBoolean()).isTrue();
+            JsonNode response=call(HttpMethod.POST,"/ai/daily/tasks/sync",admin,null);
+            assertThat(response.path("code").asInt()).isEqualTo(409);
+            assertThat(response.path("msg").asText()).contains("未同步");
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM ai_daily_task",Long.class)).isEqualTo(before);
+        } finally {
+            jdbc.update("DELETE FROM ai_daily_task WHERE category='CARE_FOLLOW_UP' AND source_id IN (SELECT id FROM care_note WHERE source_text=?)",marker);
+            jdbc.update("DELETE FROM care_note WHERE source_text=?",marker);
+        }
+    }
+
     @Test void realTaskLifecycleIsConcurrentSafeScopedAndDoesNotExecuteBusiness() throws Exception {
         String password="daily-test-login-only";
         jdbc.update("UPDATE staff SET pass=? WHERE id IN(1,4,6,7)",new BCryptPasswordEncoder().encode(password));
