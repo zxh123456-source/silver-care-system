@@ -9,10 +9,59 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.util.*;
 import java.util.concurrent.*;
 import static org.assertj.core.api.Assertions.*;
+import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.*;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.shanzhu.beadhouse.controller.AccountController;
+import com.shanzhu.beadhouse.common.config.exception.BusinessRuntimeExceptionAdvice;
+import com.shanzhu.beadhouse.entity.po.Staff;
+import com.shanzhu.beadhouse.service.impl.AccountServiceImpl;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import org.springframework.http.MediaType;
 
 /** Opt-in test against a dedicated ephemeral Redis; never uses the application database. */
 @EnabledIfEnvironmentVariable(named="RESET_TEST_REDIS_PORT", matches="[0-9]+")
 class PasswordResetGuardIntegrationTest {
+    @Test void realRedisCooldownProducesIdenticalHttpResponsesForKnownAndUnknownEmails() throws Exception {
+        RedisStandaloneConfiguration config = new RedisStandaloneConfiguration("127.0.0.1", Integer.parseInt(System.getenv("RESET_TEST_REDIS_PORT")));
+        JedisConnectionFactory factory = new JedisConnectionFactory(config); factory.afterPropertiesSet();
+        try {
+            PasswordResetGuard guard = new PasswordResetGuard();
+            ReflectionTestUtils.setField(guard, "redis", new StringRedisTemplate(factory));
+            StaffFunc staffFunc = mock(StaffFunc.class);
+            PasswordResetDelivery delivery = mock(PasswordResetDelivery.class);
+            String suffix = UUID.randomUUID().toString().replace("-", "") + "@example.com";
+            String known = "known" + suffix, unknown = "unknown" + suffix;
+            Staff staff = new Staff(); staff.setEmail(known);
+            when(staffFunc.getStaffByAccount(known)).thenReturn(staff);
+            AccountServiceImpl service = new AccountServiceImpl();
+            ReflectionTestUtils.setField(service, "resetGuard", guard);
+            ReflectionTestUtils.setField(service, "resetDelivery", delivery);
+            ReflectionTestUtils.setField(service, "staffFunc", staffFunc);
+            AccountController controller = new AccountController();
+            ReflectionTestUtils.setField(controller, "accountService", service);
+            MockMvc http = MockMvcBuilders.standaloneSetup(controller)
+                    .setControllerAdvice(new BusinessRuntimeExceptionAdvice()).build();
+            ObjectMapper json = new ObjectMapper();
+            for (int attempt = 0; attempt < 2; attempt++) {
+                MvcResult a = http.perform(post("/account/sendCode").contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(Collections.singletonMap("account", known)))).andReturn();
+                MvcResult b = http.perform(post("/account/sendCode").contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(Collections.singletonMap("account", unknown)))).andReturn();
+                assertThat(b.getResponse().getStatus()).isEqualTo(a.getResponse().getStatus());
+                JsonNode knownBody = json.readTree(a.getResponse().getContentAsString());
+                JsonNode unknownBody = json.readTree(b.getResponse().getContentAsString());
+                assertThat(knownBody.path("code").asInt()).isEqualTo(attempt == 0 ? 200 : 429);
+                assertThat(unknownBody).isEqualTo(knownBody);
+            }
+            verify(delivery, times(1)).send(eq(known), matches("[0-9]{6}"));
+            verify(delivery, never()).send(eq(unknown), anyString());
+        } finally { factory.destroy(); }
+    }
     @Test void redisEnforcesCooldownAttemptsReplayAndConcurrentConsumption() throws Exception {
         RedisStandaloneConfiguration config = new RedisStandaloneConfiguration("127.0.0.1", Integer.parseInt(System.getenv("RESET_TEST_REDIS_PORT")));
         JedisConnectionFactory factory = new JedisConnectionFactory(config); factory.afterPropertiesSet();

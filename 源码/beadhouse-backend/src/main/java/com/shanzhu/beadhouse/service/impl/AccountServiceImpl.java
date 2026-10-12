@@ -27,12 +27,14 @@ import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
+import lombok.extern.slf4j.Slf4j;
 
 import javax.annotation.Resource;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 
 @Service
+@Slf4j
 public class AccountServiceImpl implements AccountService {
     @Resource
     private AuthenticationManager authenticationManager;
@@ -85,12 +87,17 @@ public class AccountServiceImpl implements AccountService {
             return Result.error(400, "请使用已登记邮箱找回密码；手机号找回请联系管理员");
         resetGuard.throttle("send", account, clientIp());
         resetDelivery.requireAvailable();
+        // Apply identical challenge/cooldown behavior before checking account existence.
+        String code = String.format("%06d", resetRandom.nextInt(1000000));
+        resetGuard.issue(account, code);
         Staff staff = staffFunc.getStaffByAccount(account);
         if (staff != null && account.equals(staff.getEmail())) {
-            String code = String.format("%06d", resetRandom.nextInt(1000000));
-            resetGuard.issue(account, code);
             try { resetDelivery.send(staff.getEmail(), code); }
-            catch (RuntimeException failure) { resetGuard.discard(account); throw failure; }
+            catch (RuntimeException failure) {
+                resetGuard.discard(account);
+                // Keep the cooldown and generic response, including recipient-specific SMTP failures.
+                log.warn("Password reset delivery failed ({})", failure.getClass().getSimpleName());
+            }
         }
         return Result.success("如果邮箱已登记，验证码将发送至该邮箱");
     }

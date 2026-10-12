@@ -16,6 +16,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.assertj.core.api.Assertions.*;
+import java.util.HashSet;
+import java.util.Set;
 
 @ExtendWith(MockitoExtension.class)
 class AccountPasswordResetTest {
@@ -47,8 +49,51 @@ class AccountPasswordResetTest {
         when(staffFunc.getStaffByAccount(staff.getEmail())).thenReturn(staff);
         doThrow(new BusinessRuntimeException(503, "发送失败")).when(resetDelivery).send(anyString(), anyString());
         SendCodeQuery query = new SendCodeQuery(); query.setAccount(staff.getEmail());
-        assertThatThrownBy(() -> service.sendCode(query)).isInstanceOf(BusinessRuntimeException.class);
+        // Delivery failure must invalidate the challenge without revealing the registered address.
+        assertThat(service.sendCode(query).getCode()).isEqualTo(200);
         verify(resetGuard).discard(staff.getEmail());
+        verify(resetDelivery).send(eq(staff.getEmail()), matches("[0-9]{6}"));
+    }
+    @Test void repeatedRequestsCannotDistinguishRegisteredFromUnknownEmail() {
+        Staff staff = new Staff(); staff.setEmail("demo@example.com");
+        when(staffFunc.getStaffByAccount(staff.getEmail())).thenReturn(staff);
+        Set<String> cooldown = new HashSet<>();
+        doAnswer(invocation -> {
+            if (!cooldown.add(invocation.getArgument(0)))
+                throw new BusinessRuntimeException(429, "请等待60秒后重新发送");
+            return null;
+        }).when(resetGuard).issue(anyString(), anyString());
+        SendCodeQuery query = new SendCodeQuery(); query.setAccount(staff.getEmail());
+        Result knownFirst = outwardSend(query);
+        Result knownAgain = outwardSend(query);
+        query.setAccount("unknown@example.com");
+        Result unknownFirst = outwardSend(query);
+        Result unknownAgain = outwardSend(query);
+        assertThat(knownFirst.getCode()).isEqualTo(200);
+        assertThat(unknownFirst.getCode()).isEqualTo(knownFirst.getCode());
+        assertThat(unknownFirst.getMsg()).isEqualTo(knownFirst.getMsg());
+        assertThat(knownAgain.getCode()).isEqualTo(429);
+        assertThat(unknownAgain.getCode()).isEqualTo(knownAgain.getCode());
+        assertThat(unknownAgain.getMsg()).isEqualTo(knownAgain.getMsg());
+        verify(resetDelivery, times(1)).send(eq(staff.getEmail()), matches("[0-9]{6}"));
+        verify(resetDelivery, never()).send(eq("unknown@example.com"), anyString());
+    }
+    @Test void smtpFailureCannotDistinguishRegisteredFromUnknownEmail() {
+        Staff staff = new Staff(); staff.setEmail("demo@example.com");
+        when(staffFunc.getStaffByAccount(staff.getEmail())).thenReturn(staff);
+        doThrow(new BusinessRuntimeException(503, "发送失败")).when(resetDelivery).send(anyString(), anyString());
+        SendCodeQuery query = new SendCodeQuery(); query.setAccount(staff.getEmail());
+        Result known = outwardSend(query);
+        query.setAccount("unknown@example.com"); Result unknown = outwardSend(query);
+        assertThat(known.getCode()).isEqualTo(200);
+        assertThat(unknown.getCode()).isEqualTo(known.getCode());
+        assertThat(unknown.getMsg()).isEqualTo(known.getMsg());
+        verify(resetGuard).discard(staff.getEmail());
+        verify(resetDelivery, never()).send(eq("unknown@example.com"), anyString());
+    }
+    private Result outwardSend(SendCodeQuery query) {
+        try { return service.sendCode(query); }
+        catch (BusinessRuntimeException failure) { return Result.error(failure.getCode(), failure.getMsg()); }
     }
     @Test void invalidCodeCannotUpdatePassword() {
         ForgetQuery query = resetQuery();
