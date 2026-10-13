@@ -11,6 +11,19 @@
             detail=IF(state='DONE',detail,VALUES(detail)),
             revision=IF(state='DONE',revision,revision+1)
     </insert>
+    <insert id="upsertSnapshots">
+        INSERT INTO ai_daily_task(task_key,task_date,elder_id,source_id,category,title,detail,target_path,due_at)
+        VALUES
+        <foreach collection="tasks" item="task" separator=",">
+            (#{task.taskKey},#{task.taskDate},#{task.elderId},#{task.sourceId},#{task.category},
+             #{task.title},#{task.detail},#{task.targetPath},#{task.dueAt})
+        </foreach>
+        ON DUPLICATE KEY UPDATE
+            category=IF(state='DONE',category,VALUES(category)),
+            title=IF(state='DONE',title,VALUES(title)),
+            detail=IF(state='DONE',detail,VALUES(detail)),
+            revision=IF(state='DONE',revision,revision+1)
+    </insert>
     <select id="lockById" resultType="com.shanzhu.beadhouse.entity.po.DailyTask">
         SELECT * FROM ai_daily_task WHERE id=#{id} FOR UPDATE
     </select>

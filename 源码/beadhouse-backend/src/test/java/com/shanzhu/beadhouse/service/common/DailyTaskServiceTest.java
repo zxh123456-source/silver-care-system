@@ -70,8 +70,6 @@ class DailyTaskServiceTest {
         task.setState("DONE"); assertThat(task.isOverdue()).isFalse();
     }
     @Test void sourceKeysKeepCareStableButSeparateMedicationDatesAndHealthMeasurements() {
-        com.shanzhu.beadhouse.entity.vo.DailyCareOverviewVo overview=new com.shanzhu.beadhouse.entity.vo.DailyCareOverviewVo();
-        overview.setDate("2026-10-08");
         List<com.shanzhu.beadhouse.entity.vo.DailyCareItemVo> items=new ArrayList<>();
         for(String category:Arrays.asList("CARE_FOLLOW_UP","MEDICATION_PENDING","HEALTH_CHANGE")) {
             com.shanzhu.beadhouse.entity.vo.DailyCareItemVo item=new com.shanzhu.beadhouse.entity.vo.DailyCareItemVo();
@@ -79,31 +77,42 @@ class DailyTaskServiceTest {
             item.setKey(category.equals("CARE_FOLLOW_UP")?"care-10":category.equals("HEALTH_CHANGE")?"health-4":"med-10-早");
             items.add(item);
         }
-        overview.setItems(items);
-        when(dailyService.overview(any())).thenReturn(com.shanzhu.beadhouse.entity.base.Result.success(overview));
-        service.sync(new Date());
-        overview.setDate("2026-10-09"); items.get(2).setSourceId(11L);
-        service.sync(new Date());
-        ArgumentCaptor<DailyTask> capture=ArgumentCaptor.forClass(DailyTask.class);
-        verify(taskMapper,times(6)).upsertSnapshot(capture.capture());
-        List<String> keys=new ArrayList<>(); for(DailyTask value:capture.getAllValues()) keys.add(value.getTaskKey());
+        doAnswer(invocation -> {
+            java.util.function.Consumer<List<com.shanzhu.beadhouse.entity.vo.DailyCareItemVo>> consumer=invocation.getArgument(1);
+            consumer.accept(items); return null;
+        }).when(dailyService).forEachSourcePage(any(),any());
+        service.sync(java.sql.Date.valueOf("2026-10-08"));
+        items.get(2).setSourceId(11L);
+        service.sync(java.sql.Date.valueOf("2026-10-09"));
+        ArgumentCaptor<List<DailyTask>> capture=ArgumentCaptor.forClass((Class)List.class);
+        verify(taskMapper,times(2)).upsertSnapshots(capture.capture());
+        List<String> keys=new ArrayList<>(); for(List<DailyTask> batch:capture.getAllValues()) for(DailyTask value:batch) keys.add(value.getTaskKey());
         assertThat(keys).containsExactly("care-10","2026-10-08-med-10-早","health-10",
             "care-10","2026-10-09-med-10-早","health-11");
     }
-    @Test void truncatedOverviewCannotPartiallySyncOrReportSuccess() {
-        com.shanzhu.beadhouse.entity.vo.DailyCareOverviewVo overview=new com.shanzhu.beadhouse.entity.vo.DailyCareOverviewVo();
-        overview.setDate("2026-10-12"); overview.setTruncated(true); overview.setAttentionCount(201);
+    @Test void fullSourcePagesSyncWithoutConsultingDisplayOverview() {
         List<com.shanzhu.beadhouse.entity.vo.DailyCareItemVo> items=new ArrayList<>();
-        for(long id=1;id<=200;id++) {
+        for(long id=1;id<=201;id++) {
             com.shanzhu.beadhouse.entity.vo.DailyCareItemVo item=new com.shanzhu.beadhouse.entity.vo.DailyCareItemVo();
             item.setKey("care-"+id); item.setSourceId(id); item.setElderId(4L); item.setCategory("CARE_FOLLOW_UP");
             items.add(item);
         }
-        overview.setItems(items);
-        when(dailyService.overview(any())).thenReturn(com.shanzhu.beadhouse.entity.base.Result.success(overview));
+        doAnswer(invocation -> {
+            java.util.function.Consumer<List<com.shanzhu.beadhouse.entity.vo.DailyCareItemVo>> consumer=invocation.getArgument(1);
+            consumer.accept(items.subList(0,100)); consumer.accept(items.subList(100,200)); consumer.accept(items.subList(200,201));
+            return null;
+        }).when(dailyService).forEachSourcePage(any(),any());
         com.shanzhu.beadhouse.entity.base.Result response=service.sync(new Date());
-        assertThat(response.getCode()).isEqualTo(409);
-        assertThat(response.getMsg()).contains("未同步");
-        verifyNoInteractions(taskMapper,scope,audit);
+        assertThat(response.getCode()).isEqualTo(200);
+        assertThat(response.getData()).isEqualTo(201);
+        ArgumentCaptor<List<DailyTask>> batches=ArgumentCaptor.forClass((Class)List.class);
+        verify(taskMapper,times(3)).upsertSnapshots(batches.capture());
+        assertThat(batches.getAllValues()).extracting(List::size).containsExactly(100,100,1);
+        verify(dailyService,never()).overview(any());
+    }
+    @Test void futureDateDoesNotReadSourcesOrWriteTasks() {
+        Calendar future=Calendar.getInstance(); future.add(Calendar.DATE,1);
+        assertThat(service.sync(future.getTime()).getCode()).isEqualTo(400);
+        verifyNoInteractions(dailyService,taskMapper,scope,audit);
     }
 }

@@ -23,7 +23,7 @@ class DailyTaskHttpIntegrationTest {
     @Autowired JdbcTemplate jdbc;
     @Autowired TestRestTemplate http;
 
-    @Test void moreThan200SourcesExplicitlyRejectSyncWithoutCreatingPartialTasks() {
+    @Test void moreThan200SourcesSyncCompletelyAndRetryPreservesOwnershipAndCompletion() {
         String password="overflow-test-login-only";
         jdbc.update("UPDATE staff SET pass=? WHERE id=1",new BCryptPasswordEncoder().encode(password));
         String admin=login(1,password);
@@ -32,16 +32,98 @@ class DailyTaskHttpIntegrationTest {
         for(int i=0;i<201;i++) sources.add(new Object[]{marker});
         jdbc.batchUpdate("INSERT INTO care_note(elder_id,staff_id,event_time,source_text,follow_up,status,ai_generated) VALUES(4,1,DATE_SUB(NOW(),INTERVAL 1 DAY),?,'请人工复核','PENDING','N')",sources);
         try {
-            long before=jdbc.queryForObject("SELECT COUNT(*) FROM ai_daily_task",Long.class);
             JsonNode overview=call(HttpMethod.GET,"/ai/daily/overview",admin,null); ok(overview);
             assertThat(overview.path("data").path("items").size()).isEqualTo(200);
             assertThat(overview.path("data").path("truncated").asBoolean()).isTrue();
             JsonNode response=call(HttpMethod.POST,"/ai/daily/tasks/sync",admin,null);
-            assertThat(response.path("code").asInt()).isEqualTo(409);
-            assertThat(response.path("msg").asText()).contains("未同步");
-            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM ai_daily_task",Long.class)).isEqualTo(before);
+            ok(response);
+            String fixtureTasks="FROM ai_daily_task WHERE category='CARE_FOLLOW_UP' AND source_id IN (SELECT id FROM care_note WHERE source_text=?)";
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) "+fixtureTasks,Long.class,marker)).isEqualTo(201);
+            List<Long> ids=jdbc.queryForList("SELECT id "+fixtureTasks+" ORDER BY id",Long.class,marker);
+            jdbc.update("UPDATE ai_daily_task SET state='CLAIMED',owner_id=1,revision=7 WHERE id=?",ids.get(100));
+            jdbc.update("UPDATE ai_daily_task SET state='DONE',owner_id=1,revision=9,completion_note='已复核' WHERE id=?",ids.get(200));
+            ok(call(HttpMethod.POST,"/ai/daily/tasks/sync",admin,null));
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) "+fixtureTasks,Long.class,marker)).isEqualTo(201);
+            assertThat(jdbc.queryForObject("SELECT state FROM ai_daily_task WHERE id=?",String.class,ids.get(100))).isEqualTo("CLAIMED");
+            assertThat(jdbc.queryForObject("SELECT owner_id FROM ai_daily_task WHERE id=?",Long.class,ids.get(100))).isEqualTo(1);
+            assertThat(jdbc.queryForObject("SELECT state FROM ai_daily_task WHERE id=?",String.class,ids.get(200))).isEqualTo("DONE");
+            assertThat(jdbc.queryForObject("SELECT revision FROM ai_daily_task WHERE id=?",Integer.class,ids.get(200))).isEqualTo(9);
+            assertThat(jdbc.queryForObject("SELECT completion_note FROM ai_daily_task WHERE id=?",String.class,ids.get(200))).isEqualTo("已复核");
         } finally {
             jdbc.update("DELETE FROM ai_daily_task WHERE category='CARE_FOLLOW_UP' AND source_id IN (SELECT id FROM care_note WHERE source_text=?)",marker);
+            jdbc.update("DELETE FROM care_note WHERE source_text=?",marker);
+        }
+    }
+
+    @Test void bulkMedicationAndReservationsRespectScopeAndDoNotExecuteBusiness() {
+        String password="bulk-scope-test-only";
+        jdbc.update("UPDATE staff SET pass=? WHERE id=4",new BCryptPasswordEncoder().encode(password));
+        jdbc.update("INSERT INTO role_auth(role_id,auth_id,create_id,create_time,update_id,update_time) SELECT 5,a.id,1,NOW(),1,NOW() FROM auth a WHERE NOT EXISTS(SELECT 1 FROM role_auth r WHERE r.role_id=5 AND r.auth_id=a.id)");
+        jdbc.update("DELETE FROM elder_staff_assignment WHERE staff_id=4");
+        jdbc.update("INSERT INTO elder_staff_assignment(elder_id,staff_id,active) VALUES(4,4,'Y')");
+        String token=login(4,password);
+        String marker="bulk-"+UUID.randomUUID(), reserveMarker="b"+UUID.randomUUID().toString().substring(0,8);
+        List<Object[]> rows=new ArrayList<>(); for(int i=0;i<101;i++) rows.add(new Object[]{marker});
+        jdbc.batchUpdate("INSERT INTO medication_plan(elder_id,medicine_name,dose_instruction,periods,start_date) VALUES(4,?,'按已核对医嘱','早,晚',CURDATE())",rows);
+        rows=new ArrayList<>(); for(int i=0;i<101;i++) rows.add(new Object[]{reserveMarker});
+        jdbc.batchUpdate("INSERT INTO nurse_reserve(elder_id,service_name,need_date,service_price,charge_method,frequency,pay_amount,order_flag,create_id,create_time,update_id,update_time) VALUES(4,?,1,1,'按次',1,1,'N',1,NOW(),1,NOW())",rows);
+        jdbc.update("INSERT INTO care_note(elder_id,event_time,source_text,follow_up,status) VALUES(8,NOW(),?,'越权来源','PENDING')",marker);
+        Long firstPlan=jdbc.queryForObject("SELECT MIN(id) FROM medication_plan WHERE medicine_name=?",Long.class,marker);
+        Long lastPlan=jdbc.queryForObject("SELECT MAX(id) FROM medication_plan WHERE medicine_name=?",Long.class,marker);
+        jdbc.update("INSERT INTO medication_execution(plan_id,elder_id,execution_date,period,status,executed_time) VALUES(?,4,CURDATE(),'早','DONE',NOW())",firstPlan);
+        jdbc.update("INSERT INTO medication_execution(plan_id,elder_id,execution_date,period,status,executed_time,note) VALUES(?,4,CURDATE(),'晚','SKIPPED',NOW(),'测试未执行原因')",lastPlan);
+        String measuredAt=new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
+        JsonNode firstMeasurement=call(HttpMethod.POST,"/ai/health/measurement",token,map("elderId",4,"temperature",36.0,"measureTime",measuredAt)); ok(firstMeasurement);
+        JsonNode lastMeasurement=call(HttpMethod.POST,"/ai/health/measurement",token,map("elderId",4,"temperature",38.2,"measureTime",measuredAt)); ok(lastMeasurement);
+        long firstMeasurementId=firstMeasurement.path("data").path("id").asLong(), lastMeasurementId=lastMeasurement.path("data").path("id").asLong();
+        // Remove the auto-created alert task to prove source traversal really recreates this health snapshot.
+        jdbc.update("DELETE FROM ai_daily_task WHERE task_key=?","health-"+lastMeasurementId);
+        try {
+            String before=fingerprint();
+            String healthBefore=jdbc.queryForList("SELECT id,temperature,measure_time FROM health_data ORDER BY id").toString();
+            JsonNode overview=call(HttpMethod.GET,"/ai/daily/overview",token,null); ok(overview);
+            assertThat(overview.path("data").path("truncated").asBoolean()).isTrue();
+            JsonNode synced=call(HttpMethod.POST,"/ai/daily/tasks/sync",token,null); ok(synced);
+            assertThat(synced.path("data").asInt()).isEqualTo(overview.path("data").path("attentionCount").asInt());
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM ai_daily_task WHERE category LIKE 'MEDICATION_%' AND source_id IN(SELECT id FROM medication_plan WHERE medicine_name=?)",Long.class,marker)).isEqualTo(201);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM ai_daily_task WHERE category='SERVICE_BACKLOG' AND source_id IN(SELECT id FROM nurse_reserve WHERE service_name=?)",Long.class,reserveMarker)).isEqualTo(101);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM ai_daily_task WHERE category='CARE_FOLLOW_UP' AND source_id IN(SELECT id FROM care_note WHERE source_text=?)",Long.class,marker)).isZero();
+            assertThat(jdbc.queryForObject("SELECT detail FROM ai_daily_task WHERE category='MEDICATION_SKIPPED' AND source_id=?",String.class,lastPlan)).contains("测试未执行原因");
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM ai_daily_task WHERE task_key=? AND category='HEALTH_CHANGE'",Long.class,"health-"+lastMeasurementId)).isEqualTo(1);
+            assertThat(fingerprint()).isEqualTo(before);
+            assertThat(jdbc.queryForList("SELECT id,temperature,measure_time FROM health_data ORDER BY id").toString()).isEqualTo(healthBefore);
+        } finally {
+            jdbc.update("DELETE FROM ai_daily_task WHERE category='HEALTH_CHANGE' AND source_id IN (?,?)",firstMeasurementId,lastMeasurementId);
+            jdbc.update("DELETE FROM ai_care_alert WHERE kind='HEALTH_CHANGE' AND source_id IN (?,?)",firstMeasurementId,lastMeasurementId);
+            jdbc.update("DELETE FROM health_data WHERE id IN (?,?)",firstMeasurementId,lastMeasurementId);
+            jdbc.update("DELETE FROM ai_daily_task WHERE category LIKE 'MEDICATION_%' AND source_id IN(SELECT id FROM medication_plan WHERE medicine_name=?)",marker);
+            jdbc.update("DELETE FROM ai_daily_task WHERE category='SERVICE_BACKLOG' AND source_id IN(SELECT id FROM nurse_reserve WHERE service_name=?)",reserveMarker);
+            jdbc.update("DELETE FROM medication_execution WHERE plan_id IN(SELECT id FROM medication_plan WHERE medicine_name=?)",marker);
+            jdbc.update("DELETE FROM medication_plan WHERE medicine_name=?",marker);
+            jdbc.update("DELETE FROM nurse_reserve WHERE service_name=?",reserveMarker);
+            jdbc.update("DELETE FROM care_note WHERE source_text=?",marker);
+        }
+    }
+
+    @Test void laterBatchFailureRollsBackEarlierBatchesAndAllowsRetry() {
+        String password="bulk-rollback-test-only";
+        jdbc.update("UPDATE staff SET pass=? WHERE id=1",new BCryptPasswordEncoder().encode(password));
+        String admin=login(1,password), marker="rollback-"+UUID.randomUUID();
+        List<Object[]> rows=new ArrayList<>(); for(int i=0;i<201;i++) rows.add(new Object[]{marker});
+        jdbc.batchUpdate("INSERT INTO care_note(elder_id,event_time,source_text,follow_up,status) VALUES(4,DATE_SUB(NOW(),INTERVAL 1 DAY),?,'请复核','PENDING')",rows);
+        Long failureId=jdbc.queryForObject("SELECT id FROM care_note WHERE source_text=? ORDER BY id LIMIT 1 OFFSET 120",Long.class,marker);
+        String trigger="bulk_fail_"+UUID.randomUUID().toString().replace("-", "");
+        try {
+            String before=jdbc.queryForList("SELECT task_key,state,owner_id,revision FROM ai_daily_task ORDER BY id").toString();
+            jdbc.execute("CREATE TRIGGER "+trigger+" BEFORE INSERT ON ai_daily_task FOR EACH ROW BEGIN IF NEW.task_key='care-"+failureId+"' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='bulk-fixture-failure'; END IF; END");
+            try {
+                assertThat(call(HttpMethod.POST,"/ai/daily/tasks/sync",admin,null).path("code").asInt()).isEqualTo(500);
+                assertThat(jdbc.queryForList("SELECT task_key,state,owner_id,revision FROM ai_daily_task ORDER BY id").toString()).isEqualTo(before);
+            } finally { jdbc.execute("DROP TRIGGER "+trigger); }
+            ok(call(HttpMethod.POST,"/ai/daily/tasks/sync",admin,null));
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM ai_daily_task WHERE category='CARE_FOLLOW_UP' AND source_id IN(SELECT id FROM care_note WHERE source_text=?)",Long.class,marker)).isEqualTo(201);
+        } finally {
+            jdbc.update("DELETE FROM ai_daily_task WHERE category='CARE_FOLLOW_UP' AND source_id IN(SELECT id FROM care_note WHERE source_text=?)",marker);
             jdbc.update("DELETE FROM care_note WHERE source_text=?",marker);
         }
     }

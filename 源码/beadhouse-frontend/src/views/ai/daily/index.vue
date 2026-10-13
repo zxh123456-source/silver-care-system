@@ -53,7 +53,7 @@
               <el-option label="已完成" value="DONE" />
               <el-option label="全部" value="ALL" />
             </el-select>
-            <el-button type="primary" :loading="taskBusy" @click="syncTasks">同步当日事项为任务</el-button>
+            <el-button type="primary" :loading="taskBusy" @click="syncTasks">{{ syncing ? '正在全量同步，请稍候' : '全量同步所选日期事项' }}</el-button>
           </div>
         </div>
       </template>
@@ -85,7 +85,7 @@
           <el-radio-button label="HEALTH_CHANGE">健康</el-radio-button>
           <el-radio-button label="SERVICE_BACKLOG">预约</el-radio-button>
         </el-radio-group>
-        <el-tag v-if="overview.truncated" type="warning">来源过多，仅展示部分事项；请前往原业务核对</el-tag>
+        <el-tag v-if="overview.truncated" type="warning">仅展示部分事项；全量同步仍会处理所有可访问来源</el-tag>
       </div>
       <el-table :data="filteredItems" stripe empty-text="当前没有需要关注的事项">
         <el-table-column prop="elderName" label="老人" width="100" />
@@ -122,6 +122,7 @@ const router = useRouter();
 const tasks = ref<any[]>([]);
 const taskState = ref("ACTIVE");
 const taskBusy = ref(false);
+const syncing = ref(false);
 const transferVisible = ref(false);
 const transferRow = ref<any>(null);
 const targetStaffId = ref<number>();
@@ -162,13 +163,17 @@ async function resolveAlert(row: any) {
 
 function taskStatus(state: string) { return state === "DONE" ? "已完成" : state === "CLAIMED" ? "已认领" : "待认领"; }
 async function syncTasks() {
+  if (taskBusy.value) return;
   taskBusy.value = true;
+  syncing.value = true;
   try {
     const res: any = await syncDailyTasks(selectedDate.value);
     if (res.code !== 200) return ElMessage.warning(res.msg);
     ElMessage.success(res.msg);
     await load();
-  } finally { taskBusy.value = false; }
+  } catch {
+    ElMessage.warning("未确认同步结果，请刷新核对后重试；相同来源不会重复建任务");
+  } finally { taskBusy.value = false; syncing.value = false; }
 }
 async function taskAction(action: "claim" | "transfer" | "complete", row: any, extra: any = {}) {
   taskBusy.value = true;

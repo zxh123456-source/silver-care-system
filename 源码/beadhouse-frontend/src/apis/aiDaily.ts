@@ -9,7 +9,7 @@ export function listDailyTasks(date: string, state: string) {
   return http.get("/api/ai/daily/tasks", { params: { date, state } });
 }
 export function syncDailyTasks(date: string) {
-  return http.post("/api/ai/daily/tasks/sync", null, { params: { date } });
+  return http.post("/api/ai/daily/tasks/sync", null, { params: { date }, timeout: 150000 });
 }
 export function dailyTaskOwners(id: number) {
   return http.get("/api/ai/daily/tasks/owners", { params: { id } });

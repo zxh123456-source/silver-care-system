@@ -1,6 +1,8 @@
 package com.shanzhu.beadhouse.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.shanzhu.beadhouse.entity.base.BaseEntity;
 import com.shanzhu.beadhouse.common.constant.YesNoEnum;
 import com.shanzhu.beadhouse.dao.mapper.CareNoteMapper;
 import com.shanzhu.beadhouse.dao.mapper.ElderMapper;
@@ -36,10 +38,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 @Service
 public class AiDailyServiceImpl implements AiDailyService {
     private static final int MAX_ITEMS = 200;
+    private static final int SOURCE_PAGE_SIZE = 100;
 
     @Resource private CareNoteMapper careNoteMapper;
     @Resource private MedicationPlanMapper medicationPlanMapper;
@@ -75,10 +80,7 @@ public class AiDailyServiceImpl implements AiDailyService {
         dataScopeService.applyElderScope(pendingCareQuery, "elder_id");
         List<CareNote> pendingCare = careNoteMapper.selectList(pendingCareQuery);
         for (CareNote note : pendingCare) {
-            boolean historical = note.getEventTime() != null && note.getEventTime().before(day);
-            items.add(item("care-" + note.getId(), "CARE_FOLLOW_UP", historical ? "REVIEW" : "NORMAL",
-                    note.getId(), note.getElderId(), note.getEventTime(), historical ? "历史护理待跟进" : "当日护理待跟进",
-                    note.getFollowUp(), "PENDING", "/ai-care/workbench", "前往护理工作台核对并由工作人员确认完成"));
+            items.add(careItem(note, day));
         }
 
         QueryWrapper<MedicationPlan> planQuery = new QueryWrapper<MedicationPlan>()
@@ -103,12 +105,7 @@ public class AiDailyServiceImpl implements AiDailyService {
                 String status = execution == null ? "PENDING" : execution.getStatus();
                 if ("DONE".equals(status)) { medicationDone++; continue; }
                 if ("SKIPPED".equals(status)) medicationSkipped++; else medicationPending++;
-                String detail = plan.getMedicineName() + " · " + plan.getDoseInstruction();
-                if (execution != null && execution.getNote() != null) detail += "；原因：" + execution.getNote();
-                items.add(item("med-" + plan.getId() + "-" + period, "SKIPPED".equals(status) ? "MEDICATION_SKIPPED" : "MEDICATION_PENDING",
-                        "SKIPPED".equals(status) ? "HIGH" : "NORMAL", plan.getId(), plan.getElderId(), day,
-                        period + "间用药" + ("SKIPPED".equals(status) ? "未执行" : "待核对"), detail, status,
-                        "/ai-care/medication", "请按已核对医嘱进入用药页面人工登记"));
+                items.add(medicationItem(plan, execution, period, day));
             }
         }
 
@@ -123,13 +120,10 @@ public class AiDailyServiceImpl implements AiDailyService {
                     .in("elder_id", healthElderIds).le("measure_time", dayEnd).orderByAsc("measure_time", "id"));
             Map<Long, List<HealthData>> grouped = histories.stream().collect(Collectors.groupingBy(HealthData::getElderId));
             for (Long elderId : healthElderIds) {
-                List<String> reminders = healthChangeDetector.detect(grouped.getOrDefault(elderId, new ArrayList<>()));
-                if (reminders.isEmpty()) continue;
+                DailyCareItemVo health = healthItem(elderId, grouped.getOrDefault(elderId, new ArrayList<>()));
+                if (health == null) continue;
                 healthReviewCount++;
-                HealthData latest = grouped.get(elderId).get(grouped.get(elderId).size() - 1);
-                items.add(item("health-" + elderId, "HEALTH_CHANGE", "REVIEW", latest.getId(), elderId,
-                        latest.getMeasureTime(), "健康数据变化需复核", String.join("；", reminders) + "。仅描述记录变化，请人工复核。",
-                        "REVIEW", "/ai-care/health", "进入健康趋势页面结合院内流程人工复核"));
+                items.add(health);
             }
         }
 
@@ -141,9 +135,7 @@ public class AiDailyServiceImpl implements AiDailyService {
         dataScopeService.applyElderScope(reserveListQuery, "elder_id");
         List<NurseReserve> reservations = nurseReserveMapper.selectList(reserveListQuery);
         for (NurseReserve reserve : reservations) {
-            items.add(item("reserve-" + reserve.getId(), "SERVICE_BACKLOG", "NORMAL", reserve.getId(), reserve.getElderId(),
-                    reserve.getCreateTime(), "未完成服务预约", reserve.getServiceName(), "PENDING", "/serve/book",
-                    "前往服务预定页核对；执行会扣费并生成消费记录"));
+            items.add(reservationItem(reserve));
         }
 
         fillElderNames(items);
@@ -174,6 +166,110 @@ public class AiDailyServiceImpl implements AiDailyService {
                 AiMetricRecorder.Outcome.SUCCESS, "RULES", false, null,
                 System.currentTimeMillis() - startedAt, result.getAttentionCount(), items.size(), null, null);
         return Result.success(result);
+    }
+
+    @Override
+    public void forEachSourcePage(Date requestedDay, Consumer<List<DailyCareItemVo>> consumer) {
+        Date day = normalize(requestedDay);
+        Calendar end = Calendar.getInstance(); end.setTime(day); end.add(Calendar.DATE, 1);
+        Date dayEnd = end.getTime();
+        scanById(careNoteMapper, () -> new QueryWrapper<CareNote>()
+                .lt("event_time", dayEnd).ne("status", "DONE").isNotNull("follow_up").ne("follow_up", ""),
+                page -> emit(page.stream().map(note -> careItem(note, day)).collect(Collectors.toList()), consumer));
+
+        scanById(medicationPlanMapper, () -> new QueryWrapper<MedicationPlan>()
+                .le("start_date", day).and(q -> q.isNull("end_date").or().ge("end_date", day)), page -> {
+            List<Long> ids = page.stream().map(MedicationPlan::getId).collect(Collectors.toList());
+            Map<String, MedicationExecution> executions = new HashMap<>();
+            for (MedicationExecution execution : medicationExecutionMapper.selectList(new QueryWrapper<MedicationExecution>()
+                    .in("plan_id", ids).eq("execution_date", day))) {
+                executions.put(execution.getPlanId() + "#" + execution.getPeriod(), execution);
+            }
+            List<DailyCareItemVo> items = new ArrayList<>();
+            for (MedicationPlan plan : page) for (String period : plan.getPeriods().split(",")) {
+                DailyCareItemVo task = medicationItem(plan, executions.get(plan.getId() + "#" + period), period, day);
+                if (task != null) items.add(task);
+            }
+            emit(items, consumer);
+        });
+
+        // Page distinct elders, so repeated measurements never duplicate a health source or skip elders.
+        long elderCursor = 0;
+        while (true) {
+            QueryWrapper<HealthData> query = new QueryWrapper<HealthData>().select("DISTINCT elder_id")
+                    .ge("measure_time", day).lt("measure_time", dayEnd).gt("elder_id", elderCursor)
+                    .orderByAsc("elder_id").last("LIMIT " + SOURCE_PAGE_SIZE);
+            dataScopeService.applyElderScope(query, "elder_id");
+            List<HealthData> page = healthDataMapper.selectList(query);
+            if (page.isEmpty()) break;
+            List<Long> ids = page.stream().map(HealthData::getElderId).collect(Collectors.toList());
+            Map<Long, List<HealthData>> histories = healthDataMapper.selectList(new QueryWrapper<HealthData>()
+                    .in("elder_id", ids).le("measure_time", dayEnd).orderByAsc("measure_time", "id"))
+                    .stream().collect(Collectors.groupingBy(HealthData::getElderId));
+            List<DailyCareItemVo> items = new ArrayList<>();
+            for (Long id : ids) {
+                DailyCareItemVo health = healthItem(id, histories.getOrDefault(id, new ArrayList<>()));
+                if (health != null) items.add(health);
+            }
+            emit(items, consumer);
+            elderCursor = ids.get(ids.size() - 1);
+            if (page.size() < SOURCE_PAGE_SIZE) break;
+        }
+
+        scanById(nurseReserveMapper, () -> new QueryWrapper<NurseReserve>().eq("order_flag", YesNoEnum.NO.getCode()),
+                page -> emit(page.stream().map(this::reservationItem).collect(Collectors.toList()), consumer));
+    }
+
+    private <T extends BaseEntity> void scanById(BaseMapper<T> mapper, Supplier<QueryWrapper<T>> filter,
+                                                Consumer<List<T>> consumer) {
+        long cursor = 0;
+        while (true) {
+            QueryWrapper<T> query = filter.get().gt("id", cursor).orderByAsc("id").last("LIMIT " + SOURCE_PAGE_SIZE);
+            dataScopeService.applyElderScope(query, "elder_id");
+            List<T> page = mapper.selectList(query);
+            if (page.isEmpty()) break;
+            consumer.accept(page);
+            cursor = page.get(page.size() - 1).getId();
+            if (page.size() < SOURCE_PAGE_SIZE) break;
+        }
+    }
+
+    private void emit(List<DailyCareItemVo> items, Consumer<List<DailyCareItemVo>> consumer) {
+        for (int start = 0; start < items.size(); start += SOURCE_PAGE_SIZE)
+            consumer.accept(new ArrayList<>(items.subList(start, Math.min(start + SOURCE_PAGE_SIZE, items.size()))));
+    }
+
+    private DailyCareItemVo careItem(CareNote note, Date day) {
+        boolean historical = note.getEventTime() != null && note.getEventTime().before(day);
+        return item("care-" + note.getId(), "CARE_FOLLOW_UP", historical ? "REVIEW" : "NORMAL",
+                note.getId(), note.getElderId(), note.getEventTime(), historical ? "历史护理待跟进" : "当日护理待跟进",
+                note.getFollowUp(), "PENDING", "/ai-care/workbench", "前往护理工作台核对并由工作人员确认完成");
+    }
+
+    private DailyCareItemVo medicationItem(MedicationPlan plan, MedicationExecution execution, String period, Date day) {
+        String status = execution == null ? "PENDING" : execution.getStatus();
+        if ("DONE".equals(status)) return null;
+        String detail = plan.getMedicineName() + " · " + plan.getDoseInstruction();
+        if (execution != null && execution.getNote() != null) detail += "；原因：" + execution.getNote();
+        return item("med-" + plan.getId() + "-" + period, "SKIPPED".equals(status) ? "MEDICATION_SKIPPED" : "MEDICATION_PENDING",
+                "SKIPPED".equals(status) ? "HIGH" : "NORMAL", plan.getId(), plan.getElderId(), day,
+                period + "间用药" + ("SKIPPED".equals(status) ? "未执行" : "待核对"), detail, status,
+                "/ai-care/medication", "请按已核对医嘱进入用药页面人工登记");
+    }
+
+    private DailyCareItemVo healthItem(Long elderId, List<HealthData> records) {
+        List<String> reminders = healthChangeDetector.detect(records);
+        if (reminders.isEmpty()) return null;
+        HealthData latest = records.get(records.size() - 1);
+        return item("health-" + elderId, "HEALTH_CHANGE", "REVIEW", latest.getId(), elderId,
+                latest.getMeasureTime(), "健康数据变化需复核", String.join("；", reminders) + "。仅描述记录变化，请人工复核。",
+                "REVIEW", "/ai-care/health", "进入健康趋势页面结合院内流程人工复核");
+    }
+
+    private DailyCareItemVo reservationItem(NurseReserve reserve) {
+        return item("reserve-" + reserve.getId(), "SERVICE_BACKLOG", "NORMAL", reserve.getId(), reserve.getElderId(),
+                reserve.getCreateTime(), "未完成服务预约", reserve.getServiceName(), "PENDING", "/serve/book",
+                "前往服务预定页核对；执行会扣费并生成消费记录");
     }
 
     private DailyCareItemVo item(String key, String category, String level, Long sourceId, Long elderId, Date time,

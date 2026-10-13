@@ -6,6 +6,7 @@ import org.apache.ibatis.annotations.Param;
 import java.util.List;
 public interface DailyTaskMapper extends BaseMapper<DailyTask> {
     int upsertSnapshot(@Param("task") DailyTask task);
+    int upsertSnapshots(@Param("tasks") List<DailyTask> tasks);
     DailyTask lockById(@Param("id") Long id);
     List<DropDown> eligibleOwners(@Param("elderId") Long elderId, @Param("adminRoleId") long adminRoleId);
 }

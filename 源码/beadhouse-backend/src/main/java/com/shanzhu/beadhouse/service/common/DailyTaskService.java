@@ -12,6 +12,7 @@ import com.shanzhu.beadhouse.service.AiDailyService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Isolation;
 import javax.annotation.Resource;
 import java.text.SimpleDateFormat;
 import java.util.*;
@@ -28,29 +29,32 @@ public class DailyTaskService {
     @Resource private AiAuditRecorder audit;
     @Value("${ai.data-scope.admin-role-id:1}") private long adminRoleId;
 
-    @Transactional
+    @Transactional(isolation=Isolation.REPEATABLE_READ, timeout=120)
     public Result sync(Date requestedDate) {
-        Result overview=dailyService.overview(requestedDate);
-        if (overview.getCode()!=200) return overview;
-        DailyCareOverviewVo data=(DailyCareOverviewVo)overview.getData();
-        if (Boolean.TRUE.equals(data.getTruncated()))
-            return Result.error(409,"来源事项超过展示上限，本次未同步任何任务；请先在原业务处理积压事项后重试");
-        Date day=parseDay(data.getDate());
-        for(DailyCareItemVo item:data.getItems()) {
-            scope.assertElderAccess(item.getElderId());
-            DailyTask task=new DailyTask();
-            String key=item.getKey();
-            if(item.getCategory().startsWith("MEDICATION_")) key=data.getDate()+"-"+key;
-            if("HEALTH_CHANGE".equals(item.getCategory())) key="health-"+item.getSourceId();
-            task.setTaskKey(key); task.setTaskDate(day); task.setElderId(item.getElderId());
-            task.setSourceId(item.getSourceId()); task.setCategory(item.getCategory());
-            task.setTitle(item.getTitle()); task.setDetail(item.getDetail()); task.setTargetPath(item.getTargetPath());
-            Calendar deadline=Calendar.getInstance(); deadline.setTime(item.getEventTime()==null?day:item.getEventTime());
-            deadline.add(Calendar.HOUR_OF_DAY,24); task.setDueAt(deadline.getTime());
-            taskMapper.upsertSnapshot(task);
-        }
-        audit.record("每日任务","同步任务","ai_daily_task",null,"来源项="+data.getItems().size());
-        return Result.success("任务已同步；已完成任务不会重新打开",data.getItems().size());
+        Date day=normalizeDay(requestedDate==null?new Date():requestedDate);
+        if(day.after(normalizeDay(new Date()))) return Result.error(400,"不能生成未来日期的护理汇总");
+        String date=new SimpleDateFormat("yyyy-MM-dd").format(day);
+        int[] processed={0};
+        dailyService.forEachSourcePage(day,items -> {
+            List<DailyTask> batch=new ArrayList<>();
+            for(DailyCareItemVo item:items) {
+                scope.assertElderAccess(item.getElderId());
+                DailyTask task=new DailyTask();
+                String key=item.getKey();
+                if(item.getCategory().startsWith("MEDICATION_")) key=date+"-"+key;
+                if("HEALTH_CHANGE".equals(item.getCategory())) key="health-"+item.getSourceId();
+                task.setTaskKey(key); task.setTaskDate(day); task.setElderId(item.getElderId());
+                task.setSourceId(item.getSourceId()); task.setCategory(item.getCategory());
+                task.setTitle(item.getTitle()); task.setDetail(item.getDetail()); task.setTargetPath(item.getTargetPath());
+                Calendar deadline=Calendar.getInstance(); deadline.setTime(item.getEventTime()==null?day:item.getEventTime());
+                deadline.add(Calendar.HOUR_OF_DAY,24); task.setDueAt(deadline.getTime());
+                batch.add(task);
+            }
+            if(!batch.isEmpty()) taskMapper.upsertSnapshots(batch);
+            processed[0]=Math.addExact(processed[0],batch.size());
+        });
+        audit.record("每日任务","同步任务","ai_daily_task",null,"来源项="+processed[0]);
+        return Result.success("已全量处理 "+processed[0]+" 条来源事项；相同来源去重，已完成任务保持不变",processed[0]);
     }
 
     public Result list(Date date,String state) {
@@ -108,8 +112,10 @@ public class DailyTaskService {
     }
 
     private void requireTask(DailyTask task) { if(task==null) throw new BusinessRuntimeException(404,"任务不存在"); }
-    private Date parseDay(String date) {
-        try { return new SimpleDateFormat("yyyy-MM-dd").parse(date); }
-        catch(Exception e) { throw new BusinessRuntimeException(400,"日期不合法"); }
+    private Date normalizeDay(Date date) {
+        Calendar calendar=Calendar.getInstance(); calendar.setTime(date);
+        calendar.set(Calendar.HOUR_OF_DAY,0); calendar.set(Calendar.MINUTE,0);
+        calendar.set(Calendar.SECOND,0); calendar.set(Calendar.MILLISECOND,0);
+        return calendar.getTime();
     }
 }
