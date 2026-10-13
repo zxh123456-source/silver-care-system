@@ -119,6 +119,13 @@ jobs:
                   raise SystemExit(f'Integration suite did not pass without skips: {suite}')
               print(f'Executed and passed: {suite}')
           PY
+      - name: Upload verified backend for browser tests
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: backend-app
+          path: 源码/beadhouse-backend/target/beadhouse-backend-0.0.1-SNAPSHOT.jar
+          if-no-files-found: error
+          retention-days: 1
       - name: Upload backend test reports
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -151,6 +158,75 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Build with TypeScript and ESLint checks
         run: npm run build
+      - name: Upload verified frontend for browser tests
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: frontend-dist
+          path: 源码/beadhouse-frontend/dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  browser:
+    name: Browser / end-to-end
+    needs: [backend, frontend]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      TZ: Asia/Shanghai
+      PYTHONUTF8: '1'
+    services:
+      mysql:
+        image: mysql:8.0.40
+        env:
+          MYSQL_ROOT_PASSWORD: scope-test-only
+          MYSQL_ROOT_HOST: '%'
+          MYSQL_DATABASE: db_beadhouse
+          TZ: Asia/Shanghai
+        ports:
+          - 13318:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pscope-test-only --silent"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=40
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
+        with:
+          distribution: temurin
+          java-version: '8'
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: .github/e2e/requirements.txt
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: backend-app
+          path: 源码/beadhouse-backend/target/
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: frontend-dist
+          path: 源码/beadhouse-frontend/dist/
+      - name: Install browser test dependencies
+        run: |
+          python -m pip install -r .github/e2e/requirements.txt
+          python -m playwright install --with-deps chromium
+      - name: Run real browser workflows against disposable services
+        env:
+          E2E_MYSQL_CONTAINER: ${{ job.services.mysql.id }}
+        run: python .github/e2e/run.py --disposable-test
+      - name: Upload browser evidence and failure traces
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: browser-e2e-evidence
+          path: .runtime/e2e/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
 
   python:
     name: Python / dependencies + tests
