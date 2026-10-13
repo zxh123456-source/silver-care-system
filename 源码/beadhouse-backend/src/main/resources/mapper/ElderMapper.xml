@@ -1,6 +1,30 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.shanzhu.beadhouse.dao.mapper.ElderMapper">
+    <!-- All callers use alias e for elder; the bound staff ID comes from the server session. -->
+    <sql id="assignmentScope">
+        <if test="scopeStaffId != null">
+            AND EXISTS (SELECT 1 FROM elder_staff_assignment esa
+                WHERE esa.elder_id = e.id AND esa.staff_id = #{scopeStaffId} AND esa.active = 'Y')
+        </if>
+    </sql>
+    <select id="listScopedElders" resultType="com.shanzhu.beadhouse.entity.po.Elder">
+        SELECT e.* FROM elder e
+        <where>
+            e.id IS NOT NULL
+            <include refid="assignmentScope"/>
+            <choose>
+                <when test="checkFlags != null and checkFlags.size() > 0">
+                    AND e.check_flag IN
+                    <foreach collection="checkFlags" item="flag" open="(" separator="," close=")">#{flag}</foreach>
+                </when>
+                <otherwise>AND 1 = 0</otherwise>
+            </choose>
+            <if test="name != null and name != ''">AND e.name LIKE concat('%', #{name}, '%')</if>
+            <if test="phone != null and phone != ''">AND e.phone LIKE concat('%', #{phone}, '%')</if>
+        </where>
+        ORDER BY e.id
+    </select>
     <select id="listDepositRechargeByKey" resultType="com.shanzhu.beadhouse.entity.vo.PageDepositRechargeByKeyVo">
         SELECT
         e.id AS elder_id,
@@ -14,6 +38,7 @@
         LEFT JOIN bed b ON b.id = e.bed_id
         <where>
             e.id IS NOT NULL
+            <include refid="assignmentScope"/>
             AND (e.check_flag = "入住" OR e.check_flag = "退住审核")
             <if test="keyQuery.name != null and keyQuery.name != '' and keyQuery.name != 'null'">
                 AND e.name LIKE concat('%', #{keyQuery.name,jdbcType=VARCHAR}, '%')
@@ -42,6 +67,7 @@
         LEFT JOIN bed b ON b.id = e.bed_id
         <where>
             e.check_flag != '已失效'
+            <include refid="assignmentScope"/>
             <if test="keyQuery.elderName != null and keyQuery.elderName != '' and keyQuery.elderName != 'null'">
                 AND e.name LIKE concat('%', #{keyQuery.elderName,jdbcType=VARCHAR}, '%')
             </if>

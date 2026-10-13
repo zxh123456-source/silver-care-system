@@ -27,9 +27,9 @@ public class AccountController {
         return accountService.login(loginQuery);
     }
 
-    @GetMapping("/sendCode")
+    @PostMapping("/sendCode")
     @ApiOperation(value = "发送验证码", notes = Constant.DEVELOPER + Constant.EMPEROR_WEN)
-    public Result sendCode(@ApiParam(value = "发送验证码请求参数", required = true) SendCodeQuery sendCodeQuery) {
+    public Result sendCode(@ApiParam(value = "发送验证码请求参数", required = true) @RequestBody SendCodeQuery sendCodeQuery) {
         return accountService.sendCode(sendCodeQuery);
     }
 

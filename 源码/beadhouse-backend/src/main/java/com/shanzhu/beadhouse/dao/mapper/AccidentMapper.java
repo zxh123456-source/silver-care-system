@@ -24,7 +24,8 @@ public interface AccidentMapper extends BaseMapper<Accident> {
      * @param keyQuery
      * @return
      */
-    List<PageAccidentByKeyVo> listAccidentByKeyVo(@Param("keyQuery") PageAccidentByKeyQuery keyQuery);
+    List<PageAccidentByKeyVo> listAccidentByKeyVo(@Param("keyQuery") PageAccidentByKeyQuery keyQuery,
+            @Param("scopeStaffId") Long scopeStaffId);
 
     /**
      * 根据编号获取事故登记

@@ -28,6 +28,8 @@ import java.util.List;
 @Service
 public class ElderRecordServiceImpl implements ElderRecordService {
     @Resource
+    private com.shanzhu.beadhouse.service.common.AiDataScopeService dataScopeService;
+    @Resource
     private ElderMapper elderMapper;
     @Resource
     private PageUtil pageUtil;
@@ -45,7 +47,7 @@ public class ElderRecordServiceImpl implements ElderRecordService {
     @Override
     public Result exportExcel() throws IOException {
         // 获取长者列表
-        List<PageElderByKeyVo> pageElderByKeyVoList = elderMapper.listElderByKey(new PageElderByKeyQuery());
+        List<PageElderByKeyVo> pageElderByKeyVoList = elderMapper.listElderByKey(new PageElderByKeyQuery(), dataScopeService.queryStaffId());
         // 导出excel并返回requestPath
         String requestPath = excelUtil.exportExcel(pageElderByKeyVoList, PageElderByKeyVo.class);
         return Result.success(CodeEnum.SUCCESS.getMsg(), requestPath);
@@ -54,7 +56,7 @@ public class ElderRecordServiceImpl implements ElderRecordService {
     @Override
     public Result pageElderByKey(PageElderByKeyQuery query) {
         // 根据关键字获取长者列表
-        List<PageElderByKeyVo> pageElderByKeyVoList = elderMapper.listElderByKey(query);
+        List<PageElderByKeyVo> pageElderByKeyVoList = elderMapper.listElderByKey(query, dataScopeService.queryStaffId());
         // 封装返回数据
         PageResult<PageElderByKeyVo> pageResult = pageUtil.packPageResultData(pageElderByKeyVoList, query.getPageNum(), query.getPageSize());
         return Result.success(pageResult);
@@ -62,6 +64,7 @@ public class ElderRecordServiceImpl implements ElderRecordService {
 
     @Override
     public Result getElderRecordById(Long elderId) {
+        dataScopeService.assertElderAccess(elderId);
         // 根据编号获取老人
         Elder elder = elderMapper.selectById(elderId);
         // 验证老人是否存在

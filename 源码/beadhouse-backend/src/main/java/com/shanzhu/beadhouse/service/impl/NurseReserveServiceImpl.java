@@ -33,6 +33,8 @@ import java.util.Objects;
 @Service
 public class NurseReserveServiceImpl implements NurseReserveService {
     @Resource
+    private com.shanzhu.beadhouse.service.common.AiDataScopeService dataScopeService;
+    @Resource
     private ServiceItemFunc serviceItemFunc;
     @Resource
     private StaffFunc staffFunc;
@@ -48,7 +50,7 @@ public class NurseReserveServiceImpl implements NurseReserveService {
     @Override
     public Result pageNurseReserveByKey(PageNurseReserveByKeyQuery query) {
         // 根据关键词获取护理预定列表
-        List<PageNurseReserveByKeyVo> pageNurseReserveByKeyVoList = nurseReserveMapper.listNurseReserveByKey(query);
+        List<PageNurseReserveByKeyVo> pageNurseReserveByKeyVoList = nurseReserveMapper.listNurseReserveByKey(query, dataScopeService.queryStaffId());
         // 封装返回数据
         PageResult<PageNurseReserveByKeyVo> pageResult = pageUtil.packPageResultData(pageNurseReserveByKeyVoList, query.getPageNum(), query.getPageSize());
         // 替换订单状态
@@ -69,6 +71,7 @@ public class NurseReserveServiceImpl implements NurseReserveService {
 
     @Override
     public Result addNurseReserve(AddNurseReserveQuery query) {
+        dataScopeService.assertElderAccess(query.getElderId());
         // 初始化护理预定
         NurseReserve nurseReserve = BeanUtil.toBean(query, NurseReserve.class);
         nurseReserve.setOrderFlag(YesNoEnum.NO.getCode());
@@ -87,6 +90,8 @@ public class NurseReserveServiceImpl implements NurseReserveService {
     public Result executeNurseReserve(ExecuteNurseReserveQuery query) {
         // 根据编号获取护理预定
         NurseReserve getNurseReserveById = nurseReserveMapper.selectById(query.getId());
+        AssertUtil.notNull(getNurseReserveById, ExceptionEnum.DATA_NOT_EXIST);
+        dataScopeService.assertElderAccess(getNurseReserveById.getElderId());
         // 判断订单是否已完成
         boolean checkOrderFlag = ObjUtil.isNotEmpty(getNurseReserveById.getStaffId()) ||
                 ObjUtil.isNotEmpty(getNurseReserveById.getNurseDate()) ||

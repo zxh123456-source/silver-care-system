@@ -33,6 +33,8 @@ import java.util.Objects;
 @Service
 public class RetreatAuditServiceImpl implements RetreatAuditService {
     @Resource
+    private com.shanzhu.beadhouse.service.common.AiDataScopeService dataScopeService;
+    @Resource
     private ElderMapper elderMapper;
     @Resource
     private RetreatApplyMapper retreatApplyMapper;
@@ -54,7 +56,7 @@ public class RetreatAuditServiceImpl implements RetreatAuditService {
     @Override
     public Result pageRetreatAuditByKey(PageRetreatAuditQuery query) {
         // 根据搜索关键字查询退住申请信息
-        List<PageRetreatByKeyVo> pageRetreatByKeyVoList = retreatApplyMapper.listRetreatAuditByKey(query);
+        List<PageRetreatByKeyVo> pageRetreatByKeyVoList = retreatApplyMapper.listRetreatAuditByKey(query, dataScopeService.queryStaffId());
         // 封装返回数据
         PageResult<PageRetreatByKeyVo> pageResult = pageUtil.packPageResultData(pageRetreatByKeyVoList, query.getPageNum(), query.getPageSize());
         return Result.success(pageResult);
@@ -62,6 +64,7 @@ public class RetreatAuditServiceImpl implements RetreatAuditService {
 
     @Override
     public Result getElderFeeById(Long elderId) {
+        dataScopeService.assertElderAccess(elderId);
         // 根据编号获取老人
         Elder elder = elderMapper.selectById(elderId);
         // 验证老人是否存在
@@ -271,6 +274,7 @@ public class RetreatAuditServiceImpl implements RetreatAuditService {
     @Override
     @Transactional
     public Result auditElderFee(AuditElderFeeQuery query) {
+        dataScopeService.assertElderAccess(query.getElderId());
         // 验证审核结果是否合法
         boolean checkAuditResult = !Objects.equals(query.getAuditResult(), AuditEnum.PASS.getStatus()) &&
                 !Objects.equals(query.getAuditResult(), AuditEnum.NO_PASS.getStatus());

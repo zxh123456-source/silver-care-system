@@ -1,4 +1,5 @@
 from fastapi import Depends, FastAPI, Header, HTTPException
+import secrets
 
 from .models import (
     SearchHit,
@@ -21,7 +22,7 @@ app = FastAPI(title="银龄智慧康护 RAG 服务", version="1.0.0")
 
 
 def verify_token(x_internal_token: str | None = Header(default=None)) -> None:
-    if x_internal_token != settings.internal_token:
+    if x_internal_token is None or not secrets.compare_digest(x_internal_token.encode(), settings.internal_token.encode()):
         raise HTTPException(status_code=401, detail="invalid internal token")
 
 

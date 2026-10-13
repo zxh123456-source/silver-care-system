@@ -24,7 +24,8 @@ public interface RetreatApplyMapper extends BaseMapper<RetreatApply> {
      * @param keyQuery
      * @return
      */
-    List<PageRetreatByKeyVo> listRetreatApplyByKey(@Param("keyQuery") PageRetreatApplyQuery keyQuery);
+    List<PageRetreatByKeyVo> listRetreatApplyByKey(@Param("keyQuery") PageRetreatApplyQuery keyQuery,
+            @Param("scopeStaffId") Long scopeStaffId);
 
     /**
      * 根据搜索关键字查询退住申请信息
@@ -32,5 +33,6 @@ public interface RetreatApplyMapper extends BaseMapper<RetreatApply> {
      * @param keyQuery
      * @return
      */
-    List<PageRetreatByKeyVo> listRetreatAuditByKey(@Param("keyQuery") PageRetreatAuditQuery keyQuery);
+    List<PageRetreatByKeyVo> listRetreatAuditByKey(@Param("keyQuery") PageRetreatAuditQuery keyQuery,
+            @Param("scopeStaffId") Long scopeStaffId);
 }

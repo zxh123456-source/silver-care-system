@@ -32,6 +32,8 @@ import java.util.stream.Collectors;
 @Service
 public class RetreatApplyServiceImpl implements RetreatApplyService {
     @Resource
+    private com.shanzhu.beadhouse.service.common.AiDataScopeService dataScopeService;
+    @Resource
     private ElderMapper elderMapper;
     @Resource
     private BedMapper bedMapper;
@@ -47,7 +49,7 @@ public class RetreatApplyServiceImpl implements RetreatApplyService {
     @Override
     public Result pageRetreatApplyByKey(PageRetreatApplyQuery query) {
         // 根据搜索关键字查询退住申请信息
-        List<PageRetreatByKeyVo> pageRetreatByKeyVoList = retreatApplyMapper.listRetreatApplyByKey(query);
+        List<PageRetreatByKeyVo> pageRetreatByKeyVoList = retreatApplyMapper.listRetreatApplyByKey(query, dataScopeService.queryStaffId());
         // 封装返回数据
         PageResult<PageRetreatByKeyVo> pageResult = pageUtil.packPageResultData(pageRetreatByKeyVoList, query.getPageNum(), query.getPageSize());
         return Result.success(pageResult);
@@ -78,6 +80,7 @@ public class RetreatApplyServiceImpl implements RetreatApplyService {
     @Override
     @Transactional
     public Result addRetreatApply(Long elderId) {
+        dataScopeService.assertElderAccess(elderId);
         // 根据编号获取老人
         Elder elder = elderMapper.selectById(elderId);
         // 验证老人是否存在

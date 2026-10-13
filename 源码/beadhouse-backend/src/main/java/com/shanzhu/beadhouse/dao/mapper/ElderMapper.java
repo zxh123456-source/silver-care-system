@@ -25,7 +25,11 @@ public interface ElderMapper extends BaseMapper<Elder> {
      * @param keyQuery
      * @return
      */
-    List<PageDepositRechargeByKeyVo> listDepositRechargeByKey(@Param("keyQuery") PageDepositRechargeByKeyQuery keyQuery);
+    List<PageDepositRechargeByKeyVo> listDepositRechargeByKey(@Param("keyQuery") PageDepositRechargeByKeyQuery keyQuery,
+            @Param("scopeStaffId") Long scopeStaffId);
+
+    List<Elder> listScopedElders(@Param("name") String name, @Param("phone") String phone,
+            @Param("checkFlags") List<String> checkFlags, @Param("scopeStaffId") Long scopeStaffId);
 
     /**
      * 根据老人编号列表批量取消预定
@@ -47,7 +51,8 @@ public interface ElderMapper extends BaseMapper<Elder> {
      * @param keyQuery
      * @return
      */
-    List<PageElderByKeyVo> listElderByKey(@Param("keyQuery") PageElderByKeyQuery keyQuery);
+    List<PageElderByKeyVo> listElderByKey(@Param("keyQuery") PageElderByKeyQuery keyQuery,
+            @Param("scopeStaffId") Long scopeStaffId);
 
     /**
      * 根据编号将老人设置退住

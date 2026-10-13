@@ -24,7 +24,8 @@ public interface OrderMapper extends BaseMapper<Order> {
      * @param keyQuery
      * @return
      */
-    List<PageOrderByKeyVo> listOrderByKey(@Param("keyQuery") PageOrderByKeyQuery keyQuery);
+    List<PageOrderByKeyVo> listOrderByKey(@Param("keyQuery") PageOrderByKeyQuery keyQuery,
+            @Param("scopeStaffId") Long scopeStaffId);
 
     /**
      * 根据订单编号获取信息
