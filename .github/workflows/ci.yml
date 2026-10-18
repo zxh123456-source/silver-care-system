@@ -232,7 +232,7 @@ jobs:
   python:
     name: Python / dependencies + tests
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       # All credentials below belong only to this disposable CI Compose project.
       MYSQL_ROOT_PASSWORD: unused-ci-mysql-only

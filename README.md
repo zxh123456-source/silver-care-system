@@ -35,6 +35,8 @@ MySQL 容器首次创建数据卷时会依次导入演示库、AI、每日任务
 
 MySQL 容器内部端口为 `3306`，宿主机映射为 `127.0.0.1:3308`，避免与电脑上已有的 MySQL 服务冲突。Spring Boot 默认连接 3308。
 
+MinIO 的旧预构建镜像已无法拉取，Compose 现在按 [官方源码](https://github.com/minio/minio/tree/16f8cf1c52f0a77eeb8f7565aaf7f7df12454583) 构建相同的 `RELEASE.2024-12-18T13-15-44Z`，源码归档校验 SHA256，基础镜像固定 digest。首次需要联网下载 Go 依赖并编译数分钟，后续复用 Docker 构建缓存；无需本机安装 Go。构建入口为 `docker/minio/Dockerfile`，许可证随镜像保留。已有 MinIO 数据卷继续使用。
+
 ## 安全约定
 
 启动脚本会读取根目录 `.env`，然后读取可选 `本地配置.ps1`（后者优先），并检查必填密钥。直接使用 IDE 启动 Java/Python 时，需要把相同环境变量配置到运行配置中；Spring 本身不会读取根目录 `.env`。JWT 至少32字节；Spring 的 `AI_RAG_INTERNAL_TOKEN` 必须与 Python 的 `RAG_INTERNAL_TOKEN` 一致。`RAG_MILVUS_TOKEN` 默认为启动脚本拼接的 `root:<MILVUS_ROOT_PASSWORD>`，代码中不提供默认密码。
