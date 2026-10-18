@@ -1,7 +1,8 @@
 -- ONLY after importing all four initialization scripts into a disposable CI database.
 -- Administrator password has already been randomized by DemoAccountInitializer.
 UPDATE staff caregiver JOIN staff administrator ON administrator.id=1
-SET caregiver.pass=administrator.pass, caregiver.name='E2E护工', caregiver.leave_flag='N'
+SET caregiver.pass=administrator.pass, caregiver.name='E2E护工', caregiver.leave_flag='N',
+    caregiver.id_num='110101199001010000', caregiver.address='浏览器回归测试地址', caregiver.email='e2ecaregiver@example.com'
 WHERE caregiver.id=4;
 UPDATE elder SET check_flag='退住' WHERE id NOT IN(4,8);
 UPDATE elder SET name='E2E可见',check_flag='入住' WHERE id=4;

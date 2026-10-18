@@ -18,14 +18,14 @@ public class FileController {
 
     @PostMapping("/uploadImg")
     @ApiOperation(value = "单文件上传-图片", notes = Constant.DEVELOPER + Constant.EMPEROR_WEN)
-    public Result uploadImg(@ApiParam(value = "图片文件", required = true) @RequestBody MultipartFile file,
+    public Result uploadImg(@ApiParam(value = "图片文件", required = true) @RequestParam(value = "file", required = false) MultipartFile file,
                             @ApiParam(value = "接口访问请求头", required = true) @RequestHeader String token) {
         return fileService.save(file, Constant.STR_UPLOAD_IMG);
     }
 
     @PostMapping("/uploadFile")
     @ApiOperation(value = "单文件上传-附件", notes = Constant.DEVELOPER + Constant.EMPEROR_WEN)
-    public Result uploadFile(@ApiParam(value = "附件文件", required = true) @RequestBody MultipartFile file,
+    public Result uploadFile(@ApiParam(value = "附件文件", required = true) @RequestParam(value = "file", required = false) MultipartFile file,
                              @ApiParam(value = "接口访问请求头", required = true) @RequestHeader String token) {
         return fileService.save(file, Constant.STR_UPLOAD_FILE);
     }

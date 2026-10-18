@@ -93,7 +93,7 @@ jobs:
           exit 1
       - name: Build and run all backend tests
         run: mvn --batch-mode --no-transfer-progress -Dfile.encoding=UTF-8 verify
-      - name: Require all seven integration suites to execute
+      - name: Require all eight integration suites to execute
         if: always()
         run: |
           python3 - <<'PY'
@@ -107,6 +107,7 @@ jobs:
               'CareAlertHttpIntegrationTest',
               'PasswordResetGuardIntegrationTest',
               'AuthLifecycleHttpIntegrationTest',
+              'FileUploadHttpIntegrationTest',
           )
           reports = Path('target/surefire-reports')
           for suite in required:

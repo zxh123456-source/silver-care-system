@@ -2,7 +2,7 @@ package com.shanzhu.beadhouse.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.io.FileUtil;
-import cn.hutool.core.text.StrPool;
+import com.shanzhu.beadhouse.common.config.exception.BusinessRuntimeException;
 import com.shanzhu.beadhouse.common.config.file.FileTempPath;
 import com.shanzhu.beadhouse.common.config.file.FileUploadConfigPropertity;
 import com.shanzhu.beadhouse.common.constant.YesNoEnum;
@@ -16,7 +16,11 @@ import org.springframework.web.multipart.MultipartFile;
 
 import javax.annotation.Resource;
 import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @Service
 public class FileServiceImpl implements FileService {
     @Resource
@@ -30,24 +34,24 @@ public class FileServiceImpl implements FileService {
 
     @Override
     public Result save(MultipartFile file, String module) {
-        long size = file.getSize();
-        String originalFilename = file.getOriginalFilename();
         File save = fileTempPath.saveCommFile(file, module);
-        String filePath = save.getAbsolutePath();
-        String downloadUrl = fileUploadConfigPropertity.getUploadHead() + filePath
-                .replace(fileTempPath.getRootPath(), "")
-                .replace(StrPool.BACKSLASH, StrPool.SLASH);
-
-        BaseAttachment baseAttachment = new BaseAttachment();
-        baseAttachment.setName(save.getName());
-        baseAttachment.setRealName(originalFilename);
-        baseAttachment.setPath(save.getAbsolutePath());
-        baseAttachment.setUrl(downloadUrl);
-        baseAttachment.setSuff(FileUtil.getSuffix(save));
-        baseAttachment.setSize(size);
-        baseAttachment.setDelFlag(YesNoEnum.NO.getCode());
-        baseAttachmentMapper.insert(baseAttachment);
-
-        return Result.success(BeanUtil.toBean(baseAttachment, FileInfoVo.class));
+        try {
+            String head = fileUploadConfigPropertity.getUploadHead();
+            String downloadUrl = (head == null ? "" : head.replaceAll("/+$", "")) + fileTempPath.downloadUrl(save);
+            BaseAttachment attachment = new BaseAttachment();
+            attachment.setName(save.getName());
+            attachment.setRealName(file.getOriginalFilename());
+            attachment.setPath(save.getAbsolutePath());
+            attachment.setUrl(downloadUrl);
+            attachment.setSuff(FileUtil.getSuffix(save));
+            attachment.setSize(Files.size(save.toPath()));
+            attachment.setDelFlag(YesNoEnum.NO.getCode());
+            if (baseAttachmentMapper.insert(attachment) != 1) throw new IllegalStateException("Attachment was not saved");
+            return Result.success(BeanUtil.toBean(attachment, FileInfoVo.class));
+        } catch (RuntimeException | IOException failure) {
+            try { Files.deleteIfExists(save.toPath()); }
+            catch (IOException cleanupFailure) { log.warn("Upload cleanup failed ({})", cleanupFailure.getClass().getSimpleName()); }
+            throw new BusinessRuntimeException(503, "文件保存失败，请稍后重试");
+        }
     }
 }

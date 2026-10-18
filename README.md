@@ -51,6 +51,12 @@ Milvus 已启用认证，MinIO 用户和密码同时传给 MinIO 与 Milvus 存�
 
 普通员工管理接口与既有列表/角色选择器保持一致：不能创建或分配超级管理员角色，也不能通过编号读取、编辑或离职任何超级管理员。服务端按角色校验，不依赖隐藏按钮或固定账号编号。普通员工的管理操作保留，账号登录和密码找回流程独立处理。
 
+上传接口要求有效登录。客户端文件名不能包含目录、盘符或控制字符，最长225字符；服务端使用随机 UUID 文件名，原名仅保存为附件元数据。图片仅接受真实 JPG/PNG，最大2MiB、单边8192像素且总像素不超过1600万；普通附件最大20MiB，读取流时再次检查大小。暂存文件位于未公开映射的 `.staging` 目录，上传或元数据保存失败会清理本次文件，存储故障返回503。上传附件强制下载，上传资源设置 `nosniff` 和沙箱 CSP。资源读取仍沿用现有公开 URL，私有附件的逐文件访问授权需单独建设。
+
+图片组件在服务端确认成功后才替换原图，伪装图片或网络失败保留原图；删除图片会清空表单中的 URL。业务校验失败沿用现有 HTTP 200 + 业务码400的约定，页面检查业务码后显示错误。
+
+上传请求统一经过前端 `/api` 代理，新文件 URL 默认使用当前站点的 `/api/upload/...`；需要独立资源域名时设置 `FILE_UPLOAD_HEAD`。已有数据库中保存的历史绝对 URL 不自动改写。
+
 认证失败返回 HTTP/业务码401，权限不足返回403；会话存储或员工状态查询不可用返回503。前端仅对失效私有会话清理登录状态，403保留登录；并发401只触发一次退出，较早请求的失败不会注销后来新建的会话。其他旧业务码保留既有传输约定。SQL参数默认不输出到日志；仅本地排障时可显式设置 `MYBATIS_LOG_IMPL=org.apache.ibatis.logging.stdout.StdOutImpl`。
 
 密码找回使用已登记邮箱，通过 `POST /account/sendCode` 申请验证码（请求仅包含 `account`），通过 `PUT /account/forget` 提交 `account`、`code`、`pass`。手机号自助找回暂不可用，请联系管理员。需要配置 `PASSWORD_RESET_EMAIL_ENABLED=true`、`MAIL_HOST`、`MAIL_ADDRESS`、`MAIL_PASSWORD` 才能发信；默认关闭。邮件采用 SMTP 587 + 必须启用 STARTTLS。
@@ -120,7 +126,7 @@ Get-Content -Raw -Encoding UTF8 数据库/daily_task_upgrade.sql | docker compos
 
 ## 配置回归检查
 
-GitHub Actions 的 `CI` 工作流在 main 推送、面向 main 的 PR（含草稿）及手动触发时运行：后端 JDK 8 完整构建和独立 MySQL/Redis 集成测试、前端 Node 24 全新 `npm ci` 与生产构建、Python 3.12 全量服务依赖安装与 pytest，以及 Chromium 浏览器端到端回归。关键的七组后端集成测试（含真实认证会话生命周期）若未执行或被跳过，CI 会失败，避免仅单元测试通过。测试报告作为 artifact 保留7天；普通 ESLint 警告不会导致构建失败。
+GitHub Actions 的 `CI` 工作流在 main 推送、面向 main 的 PR（含草稿）及手动触发时运行：后端 JDK 8 完整构建和独立 MySQL/Redis 集成测试、前端 Node 24 全新 `npm ci` 与生产构建、Python 3.12 全量服务依赖安装与 pytest，以及 Chromium 浏览器端到端回归。关键的八组后端集成测试（含真实认证会话生命周期及上传/下载响应）若未执行或被跳过，CI 会失败，避免仅单元测试通过。测试报告作为 artifact 保留7天；普通 ESLint 警告不会导致构建失败。
 
 CI 使用临时库和合成测试凭据，不读取本地 `.env`，不需要配置 GitHub Secrets，也不调用真实邮件或外部模型。浏览器 job 使用前两组检查产出的同一份 JAR/dist，在全新的 MySQL 和专用 Redis 上通过真实页面验证登录、老人分配与撤销、健康测量/告警、超过200条的全量同步、任务认领/转交/完成、用药登记及告警解除，不模拟业务接口响应。失败时保留截图、trace、后端日志和 JUnit 报告。OCR 测试仍按现有环境条件执行；当前测试使用 Windows Tesseract 路径，在 Linux runner 中会跳过。CI 不代替 BGE 质量评测、其他浏览器/移动端或完整本机一键启动验证。
 

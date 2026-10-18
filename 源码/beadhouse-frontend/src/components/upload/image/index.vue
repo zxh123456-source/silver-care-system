@@ -3,6 +3,8 @@
     v-model:file-list="imageList"
     :action="requestUrl"
     :headers="{ token: token }"
+    accept="image/jpeg,image/png"
+    :disabled="uploading"
     list-type="picture-card"
     :before-upload="uploadBefore"
     :on-error="handleError"
@@ -51,88 +53,87 @@ uploadParams.value.imageList.push({
 -->
 <script lang="ts" setup>
 import store from "@/store";
-import { baseUrl } from "@/utils/http";
 import { ElMessage } from "element-plus";
 import { Plus } from "@element-plus/icons-vue";
-import { defineEmits, onMounted, ref, watch } from "vue";
-import type { UploadUserFile, ElUpload } from "element-plus";
+import { computed, defineEmits, ref, watch } from "vue";
+import type { UploadUserFile } from "element-plus";
 // page data
 const dialogImageUrl = ref("");
 const dialogVisible = ref(false);
 const imageList = ref<UploadUserFile[]>([]);
+const uploading = ref(false);
 
 // father component transfer to this date
 const props = defineProps({
   uploadParams: Object
 });
 // 将即将渲染的图片添加到列表
-onMounted(() => {
-  props.uploadParams?.["imageList"].forEach((image: any) => {
-    imageList.value.push(image);
-  });
-});
+watch(() => props.uploadParams?.imageList, images => {
+  imageList.value = [...(images || [])];
+}, { immediate: true });
 
 // http request data
-const requestUrl = baseUrl + "file/uploadImg";
-const token = store.state.app.token;
+const requestUrl = "/api/file/uploadImg";
+const token = computed(() => store.state.app.token);
 
 // return data
-const imageUrlList = ref<any[]>([]);
 // 获取父组件方法
 const emits = defineEmits(["setImageData"]);
 // 更新数据
 const updateData = () => {
-  // 更新列表
-  imageUrlList.value = [];
-  imageList.value.forEach(image => imageUrlList.value.push(image.url));
-  // 封装图片数据
-  const data = ref<any>();
-  if (props.uploadParams?.["uploadType"] === "single") {
-    data.value = imageUrlList.value[0];
-  } else {
-    data.value = imageUrlList;
-  }
-  // 调用方法设置图片
-  emits("setImageData", data);
+  const urls = imageList.value.filter(image => (!image.status || image.status === "success")
+    && typeof image.url === "string" && !image.url.startsWith("blob:")).map(image => image.url);
+  emits("setImageData", props.uploadParams?.uploadType === "single" ? (urls[0] || "") : urls);
 };
-
-// 监听图片列表
-watch(imageList, (value, oldValue, onCleanup) => {
-  if (props.uploadParams?.["uploadType"] === "single" && imageList.value.length > 1) {
-    imageList.value.splice(0, 1);
-    updateData();
-  }
-});
 
 // 上传之前
 const uploadBefore = (file: any) => {
   const isJPG = file.type === "image/jpeg" || file.type === "image/png";
-  const isLt2M = file.size / 1024 / 1024 < 2;
+  const isLt2M = file.size > 0 && file.size <= 2 * 1024 * 1024;
 
   if (!isJPG) {
     ElMessage.error("只能上传jpg/png文件！");
   }
   if (!isLt2M) {
-    ElMessage.error("文件大小不能超过2MB！");
+    ElMessage.error("图片不能为空且不能超过2MB！");
   }
 
-  return isJPG && isLt2M;
+  uploading.value = isJPG && isLt2M;
+  return uploading.value;
 };
 
 // 上传失败
-const handleError = (response: any) => {
-  ElMessage.error(response.data.msg);
+const handleError = (error: any, uploadFile: any) => {
+  uploading.value = false;
+  releasePreview(uploadFile);
+  imageList.value = imageList.value.filter(image => image.uid !== uploadFile.uid);
+  let message = "上传失败，请检查登录状态或稍后重试";
+  try { message = JSON.parse(error.message)?.msg || message; } catch { /* Network errors have no JSON body. */ }
+  ElMessage.error(message);
 };
 
 // 上传成功
 const handleSuccess = (response: any, uploadFile: any) => {
+  uploading.value = false;
+  if (response?.code !== 200 || typeof response?.data?.url !== "string") {
+    releasePreview(uploadFile);
+    imageList.value = imageList.value.filter(image => image.uid !== uploadFile.uid);
+    ElMessage.error(response?.msg || "上传失败，请重试");
+    return;
+  }
+  releasePreview(uploadFile);
   uploadFile.url = response.data.url;
+  if (props.uploadParams?.uploadType === "single") imageList.value = [uploadFile];
   updateData();
 };
 
+const releasePreview = (file: UploadUserFile) => {
+  if (file.url?.startsWith("blob:")) URL.revokeObjectURL(file.url);
+};
+
 // 删除图片
-const handleRemove = async (uploadFile: any) => {
-  imageList.value.filter((image) => image.uid !== uploadFile.uid);
+const handleRemove = (uploadFile: any) => {
+  imageList.value = imageList.value.filter(image => image.uid !== uploadFile.uid);
   updateData();
 
   // TODO 根据【imageId : uploadFile.uid】调用删除数据库图片的接口

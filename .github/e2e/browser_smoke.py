@@ -1,5 +1,6 @@
 """Real browser -> local static proxy -> Spring Boot -> disposable MySQL/Redis."""
 import contextlib
+import base64
 import functools
 import json
 import threading
@@ -33,6 +34,8 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
                 with contextlib.suppress(BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
                     self.send_response(response.status)
                     self.send_header("Content-Type", response.headers.get("Content-Type", "application/json"))
+                    for header in ("Content-Disposition", "Content-Security-Policy", "X-Content-Type-Options"):
+                        if response.headers.get(header): self.send_header(header, response.headers[header])
                     self.send_header("Content-Length", str(len(data)))
                     self.end_headers()
                     self.wfile.write(data)
@@ -136,6 +139,41 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
                 expect(admin.get_by_role("button", name="登录", exact=True)).to_be_enabled()
                 record("incorrect credentials return 401 and login remains usable")
                 login(admin, "13547584400")
+                admin.goto(origin + "/#/people/staff")
+                employee = admin.locator(".el-table__body tbody tr").filter(has_text="E2E护工")
+                expect(employee).to_have_count(1)
+                employee.get_by_role("button", name="编辑", exact=True).click()
+                editor = admin.get_by_role("dialog", name="编辑", exact=True)
+                expect(editor).to_be_visible()
+                png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEUlEQVR4nGP4z8DA8B+MgBgAHfAD/dPQfSYAAAAASUVORK5CYII=")
+                with admin.expect_response(lambda response: "/api/file/uploadImg" in response.url) as uploaded:
+                    editor.locator("input[type=file]").set_input_files({"name": "care.png", "mimeType": "image/png", "buffer": png})
+                image_result = uploaded.value.json()
+                assert image_result["code"] == 200, image_result
+                image_url = image_result["data"]["url"]
+                expect(editor.locator(".el-upload-list__item")).to_have_count(1)
+                expect(editor.locator(".el-upload-list__item img")).to_have_attribute("src", image_url)
+                admin.wait_for_function("() => { const i=document.querySelector('[role=dialog] .el-upload-list__item img'); return i && i.complete && i.naturalWidth===2; }")
+                with admin.expect_response(lambda response: "/api/file/uploadImg" in response.url) as invalid_image:
+                    editor.locator("input[type=file]").set_input_files({"name": "forged.png", "mimeType": "image/png", "buffer": b"<html>not a picture</html>"})
+                assert invalid_image.value.json()["code"] == 400
+                expect(admin.get_by_text("图片内容无效", exact=True)).to_be_visible()
+                expect(editor.locator(".el-upload-list__item")).to_have_count(1)
+                expect(editor.locator(".el-upload-list__item img")).to_have_attribute("src", image_url)
+                record("real image upload renders and a forged replacement preserves the saved image")
+                with admin.expect_request(lambda request: "/api/staff/editStaff" in request.url) as saved_request:
+                    click_api(admin, editor.get_by_role("button", name="提交", exact=True), "/api/staff/editStaff", "PUT")
+                assert saved_request.value.post_data_json["avator"] == image_url
+                expect(editor).not_to_be_visible()
+                employee.get_by_role("button", name="编辑", exact=True).click()
+                expect(editor.locator(".el-upload-list__item img")).to_have_attribute("src", image_url)
+                editor.locator(".el-upload-list__item").hover()
+                editor.locator(".el-upload-list__item-delete").click()
+                expect(editor.locator(".el-upload-list__item")).to_have_count(0)
+                editor.get_by_role("button", name="提交", exact=True).click()
+                expect(editor.get_by_text("请选择上传员工头像", exact=True)).to_be_visible()
+                editor.get_by_role("button", name="取消", exact=True).click()
+                record("uploaded avatar persists and removing it clears the form value")
                 route(admin, "/ai-care/scope", "老人数据权限")
                 choose_elder(admin)
                 select_option(admin, admin.locator(".toolbar .el-select"), "E2E护工")

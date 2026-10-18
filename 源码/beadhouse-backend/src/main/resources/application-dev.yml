@@ -91,7 +91,7 @@ filesave:
   windows: D:\exam
   macos: /Users/jiawang/temp/upload
   linux: /Test/project/file/upload/
-  upload-head: http://127.0.0.1:9001
+  upload-head: ${FILE_UPLOAD_HEAD:/api}
   local-head: http://127.0.0.1:9001
 ignore:
   # 白名单，不需要登录即可访问
