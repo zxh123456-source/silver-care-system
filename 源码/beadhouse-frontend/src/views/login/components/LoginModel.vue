@@ -93,7 +93,7 @@ const loading = ref(false)
 
 const handleLogin = async (formRef: FormInstance | null) => {
   loading.value = true
-  if (!formRef) return
+  if (!formRef) { loading.value = false; return }
   formRef.validate((valid, fields) => {
     if (valid) {
       //单独校验图形验证码
@@ -123,6 +123,8 @@ const handleLogin = async (formRef: FormInstance | null) => {
               })
             }
           })
+          .catch(() => { /* Authentication errors are displayed by the shared HTTP handler. */ })
+          .finally(() => { loading.value = false })
       } else {
         ElMessage({
           message: '验证码错误',

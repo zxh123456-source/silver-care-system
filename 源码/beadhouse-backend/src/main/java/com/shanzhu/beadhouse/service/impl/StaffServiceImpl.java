@@ -96,6 +96,8 @@ public class StaffServiceImpl implements StaffService {
         Staff staff = BeanUtil.toBean(query, Staff.class);
         // 修改
         staffMapper.updateById(staff);
+        // Role/profile edits must not leave the previous authorities active in the login cache.
+        redisUtil.deleteObject(Constant.LOGIN_REDIS + query.getId());
         return Result.success();
     }
 

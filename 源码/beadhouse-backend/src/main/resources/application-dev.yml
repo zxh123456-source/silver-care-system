@@ -85,7 +85,7 @@ mybatis-plus:
   type-aliases-package: com.shanzhu.beadhouse.entity.po
   configuration:
     # 打印sql操作记录g
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    log-impl: ${MYBATIS_LOG_IMPL:org.apache.ibatis.logging.nologging.NoLoggingImpl}
 # 文件通用路径配置
 filesave:
   windows: D:\exam

@@ -69,10 +69,7 @@ public class BusinessRuntimeExceptionAdvice {
             }
             errorMsg = checkMsg ? message : ExceptionEnum.SYS_ERROR.getMsg();
         }
-        if (log.isInfoEnabled()) {
-            log.info(errorType);
-            ex.printStackTrace();
-        }
+        log.debug("{}: code={}, type={}", errorType, errorCode, ex.getClass().getSimpleName());
         ResponseUtil.resultOut(response, Result.error(errorCode, errorMsg));
     }
 }

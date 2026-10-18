@@ -125,6 +125,16 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
                         has=page.get_by_text(text, exact=True)).click()
 
                 admin = new_page("admin")
+                admin.goto(origin + "/#/login")
+                admin.get_by_placeholder("账号", exact=True).fill("13547584400")
+                admin.get_by_placeholder("密码", exact=True).fill(password + "incorrect")
+                admin.get_by_placeholder("验证码", exact=True).fill(admin.evaluate('window.captchaDigits.slice(-4).join("")'))
+                with admin.expect_response(lambda response: "/api/account/login" in response.url) as rejected:
+                    admin.get_by_role("button", name="登录", exact=True).click()
+                assert rejected.value.status == 401
+                assert rejected.value.json()["code"] == 401
+                expect(admin.get_by_role("button", name="登录", exact=True)).to_be_enabled()
+                record("incorrect credentials return 401 and login remains usable")
                 login(admin, "13547584400")
                 route(admin, "/ai-care/scope", "老人数据权限")
                 choose_elder(admin)
@@ -200,17 +210,39 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
                 expect(staff.locator(".task-center").first).not_to_contain_text("E2E测试计划")
                 record("completed medication execution resolves its alert")
 
+                route(staff, "/ai-care/health", "健康趋势观察")
+                choose_elder(staff, scoped=True)
+                staff.locator(".el-form-item").filter(has=staff.locator("label").filter(
+                    has_text="体温")).get_by_role("spinbutton").fill("36.5")
                 route(admin, "/ai-care/scope", "老人数据权限")
                 row = admin.locator(".el-table__body tbody tr").filter(has_text="E2E护工")
                 row.get_by_role("button", name="撤销", exact=True).click()
                 click_api(admin, admin.locator(".el-message-box").get_by_role("button", name="确定", exact=True),
                           "/api/ai/scope/assignment", method="DELETE")
+                with staff.expect_response(lambda response: "/api/ai/health/measurement" in response.url
+                                           and response.request.method == "POST") as forbidden:
+                    staff.get_by_role("button", name="保存测量").click()
+                assert forbidden.value.status == 403
+                assert forbidden.value.json()["code"] == 403
+                assert staff.evaluate('Boolean(JSON.parse(localStorage.getItem("stateData"))?.app?.token)')
+                record("forbidden stale form returns 403 without logging out")
                 route(staff, "/ai-care/health", "健康趋势观察")
                 with staff.expect_response(lambda response: "/api/ai/scope/elders" in response.url) as response:
                     staff.get_by_role("button", name="选择", exact=True).first.click()
                 assert response.value.json()["data"]["total"] == 0
                 expect(staff.get_by_role("dialog", name="选择老人").locator(".el-table__body tbody tr")).to_have_count(0)
                 record("elder permission revocation takes effect without relogin")
+                # Revoke the actual Redis session while retaining browser state to exercise the shared 401 handler.
+                logged_out = staff.evaluate('''async () => {
+                    const token=JSON.parse(localStorage.getItem("stateData")).app.token;
+                    const response=await fetch("/api/account/logout",{method:"DELETE",headers:{token}});
+                    return (await response.json()).code;
+                }''')
+                assert logged_out == 200
+                staff.goto(f"{origin}/?expired={time.monotonic_ns()}#/ai-care/daily")
+                staff.wait_for_url(lambda url: "/login" in url)
+                assert not staff.evaluate('JSON.parse(localStorage.getItem("stateData") || "null")?.app?.token')
+                record("expired session redirects to login and clears browser credentials")
                 assert not errors, errors
                 admin.screenshot(path=str(evidence / "admin.png"))
                 staff.screenshot(path=str(evidence / "staff.png"))
