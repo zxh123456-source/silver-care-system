@@ -233,6 +233,15 @@ jobs:
     name: Python / dependencies + tests
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    env:
+      # All credentials below belong only to this disposable CI Compose project.
+      MYSQL_ROOT_PASSWORD: unused-ci-mysql-only
+      REDIS_PASSWORD: unused-ci-redis-only
+      MINIO_ROOT_USER: ci-rag
+      MINIO_ROOT_PASSWORD: ci-minio-fixture-password-32-bytes
+      MILVUS_ROOT_PASSWORD: ci-milvus-fixture-password-32-bytes
+      RAG_TEST_MILVUS_URI: http://127.0.0.1:19530
+      RAG_TEST_MILVUS_TOKEN: root:ci-milvus-fixture-password-32-bytes
     defaults:
       run:
         working-directory: 源码/beadhouse-ai
@@ -247,8 +256,21 @@ jobs:
           cache-dependency-path: 源码/beadhouse-ai/requirements*.txt
       - name: Install full service dependencies
         run: python -m pip install -r requirements.txt
+      - name: Start authenticated Milvus for real RAG regression
+        working-directory: .
+        run: docker compose -p silvercare-rag-ci up -d --wait --wait-timeout 180 milvus
       - name: Test settings, retrieval and injection guards
         run: python -m pytest -q --junitxml=test-results/pytest.xml
+      - name: Require the real Milvus test to execute
+        run: |
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          cases = [case for case in ET.parse('test-results/pytest.xml').iter('testcase')
+                   if case.get('name') == 'test_real_milvus_preparation_failure_and_disk_failure_preserve_index_then_retry']
+          assert len(cases) == 1, 'Missing real Milvus regression'
+          assert not any(cases[0].find(tag) is not None for tag in ('skipped', 'failure', 'error')), 'Real Milvus regression did not pass'
+          print('Real Milvus regression executed and passed')
+          PY
       - name: Upload Python test report
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -257,3 +279,7 @@ jobs:
           path: 源码/beadhouse-ai/test-results/pytest.xml
           if-no-files-found: warn
           retention-days: 7
+      - name: Remove disposable RAG infrastructure
+        if: always()
+        working-directory: .
+        run: docker compose -p silvercare-rag-ci down --volumes

@@ -1,4 +1,6 @@
 import logging
+import threading
+from functools import wraps
 
 from .embedding import EmbeddingProvider
 from .retrieval import HybridRetriever, cosine, tokenize
@@ -12,10 +14,20 @@ class BackendUnavailable(RuntimeError):
     pass
 
 
+def serialized(operation):
+    @wraps(operation)
+    def guarded(self, *args, **kwargs):
+        # FastAPI sync endpoints run in multiple threads; a source update and its index write are one operation.
+        with self._operation_lock:
+            return operation(self, *args, **kwargs)
+    return guarded
+
+
 class RetrievalBackend:
     def __init__(self, settings: Settings, store: JsonDocumentStore):
         self.settings = settings
         self.store = store
+        self._operation_lock = threading.RLock()
         self.embedder = EmbeddingProvider(settings)
         self.memory = HybridRetriever(settings.dense_dimension, self.embedder, self.embedder.minimum_score)
         self._milvus = None
@@ -26,8 +38,12 @@ class RetrievalBackend:
     def name(self) -> str:
         return "milvus-hybrid" if self._milvus is not None else "memory-hybrid"
 
+    @serialized
     def upsert_document(self, document_key: str, title: str, source: str, chunks: list[dict]) -> int:
-        count = self.store.upsert_document(document_key, title, source, chunks)
+        try:
+            count = self.store.upsert_document(document_key, title, source, chunks)
+        except OSError as failure:
+            raise BackendUnavailable("Document storage unavailable") from failure
         if self.settings.backend.lower() == "milvus":
             milvus = self._require_milvus()
             try:
@@ -37,8 +53,12 @@ class RetrievalBackend:
                 raise BackendUnavailable("Milvus indexing unavailable") from exception
         return count
 
+    @serialized
     def delete_document(self, document_key: str) -> int:
-        count = self.store.delete_document(document_key)
+        try:
+            count = self.store.delete_document(document_key)
+        except OSError as failure:
+            raise BackendUnavailable("Document storage unavailable") from failure
         if self.settings.backend.lower() == "milvus":
             milvus = self._require_milvus()
             try:
@@ -48,6 +68,7 @@ class RetrievalBackend:
                 raise BackendUnavailable("Milvus deletion unavailable") from exception
         return count
 
+    @serialized
     def search(self, question: str, top_k: int) -> tuple[str, list[dict], bool, str | None]:
         if self.settings.backend.lower() == "milvus":
             try:

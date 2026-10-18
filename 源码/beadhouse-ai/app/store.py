@@ -1,4 +1,7 @@
 import json
+import contextlib
+import os
+import tempfile
 import threading
 from pathlib import Path
 
@@ -16,9 +19,9 @@ class JsonDocumentStore:
 
     def upsert_document(self, document_key: str, title: str, source: str, chunks: list[dict]) -> int:
         with self._lock:
-            self._chunks = [item for item in self._chunks if item["document_key"] != document_key]
+            updated = [item for item in self._chunks if item["document_key"] != document_key]
             for chunk in chunks:
-                self._chunks.append(
+                updated.append(
                     {
                         "document_key": document_key,
                         "chunk_id": int(chunk["chunk_id"]),
@@ -28,28 +31,52 @@ class JsonDocumentStore:
                         "content": chunk["content"],
                     }
                 )
-            self._save()
+            self._validate(updated)
+            self._save(updated)
+            self._chunks = updated
             return len(chunks)
 
     def delete_document(self, document_key: str) -> int:
         with self._lock:
             before = len(self._chunks)
-            self._chunks = [item for item in self._chunks if item["document_key"] != document_key]
-            self._save()
-            return before - len(self._chunks)
+            updated = [item for item in self._chunks if item["document_key"] != document_key]
+            self._save(updated)
+            self._chunks = updated
+            return before - len(updated)
 
     def _load(self) -> None:
         if not self.path.exists():
             return
         try:
             value = json.loads(self.path.read_text(encoding="utf-8"))
-            if isinstance(value, list):
-                self._chunks = value
-        except (OSError, json.JSONDecodeError):
-            self._chunks = []
+        except json.JSONDecodeError as failure:
+            raise ValueError("Invalid document store JSON; restore or rebuild from the source database") from failure
+        self._validate(value)
+        self._chunks = value
 
-    def _save(self) -> None:
+    @staticmethod
+    def _validate(value) -> None:
+        if not isinstance(value, list):
+            raise ValueError("Invalid document store: expected a list")
+        for item in value:
+            if not isinstance(item, dict) or any(not isinstance(item.get(key), str)
+                    for key in ("document_key", "title", "source", "content")):
+                raise ValueError("Invalid document store record")
+            if any(type(item.get(key)) is not int for key in ("chunk_id", "section_no")):
+                raise ValueError("Invalid document store identifiers")
+
+    def _save(self, chunks: list[dict]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.path.with_suffix(self.path.suffix + ".tmp")
-        temporary.write_text(json.dumps(self._chunks, ensure_ascii=False, indent=2), encoding="utf-8")
-        temporary.replace(self.path)
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=self.path.parent,
+                                             prefix=self.path.name + ".", suffix=".tmp", delete=False) as output:
+                temporary = Path(output.name)
+                json.dump(chunks, output, ensure_ascii=False, indent=2)
+                output.flush()
+                os.fsync(output.fileno())
+            temporary.replace(self.path)
+        finally:
+            if temporary is not None:
+                with contextlib.suppress(OSError):
+                    temporary.unlink(missing_ok=True)

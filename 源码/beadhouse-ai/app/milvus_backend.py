@@ -70,7 +70,6 @@ class MilvusHybridBackend:
         self.client.load_collection(collection_name=self.collection)
 
     def upsert_document(self, document_key: str, title: str, source: str, chunks: list[dict]) -> int:
-        self.delete_document(document_key)
         rows = []
         for chunk in chunks:
             content = chunk["content"]
@@ -86,6 +85,8 @@ class MilvusHybridBackend:
                     "dense_vector": self.embedder.embed([title + " " + content])[0],
                 }
             )
+        # Prepare every embedding before touching the previously searchable version.
+        self.delete_document(document_key)
         if rows:
             self.client.insert(collection_name=self.collection, data=rows)
         return len(rows)

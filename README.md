@@ -62,6 +62,8 @@ Milvus 已启用认证，MinIO 用户和密码同时传给 MinIO 与 Milvus 存�
 详细功能和验收方法见 [AI护理工作台使用说明.md](./AI护理工作台使用说明.md)。
 本轮实际检查结果和未覆盖范围见 [协作验收记录.md](./协作验收记录.md)。
 
+RAG 文档缓存已增加磁盘失败保护、损坏文件校验和单进程并发写入保护；向量计算失败会保留旧 Milvus 索引。跨服务失败继续由现有 MySQL 同步队列重试，详见 [RAG 服务说明](./源码/beadhouse-ai/README.md)。
+
 ## 健康与用药告警
 
 新增健康测量时，在同一事务中比较当前填写指标与最近历史记录（最多90条），触发已有变化阈值后保存 HEALTH_CHANGE 告警；只填写体重不会重新触发旧体温变化。此功能只描述数据变化，不作诊断。用药登记 SKIPPED 自动保存 MEDICATION_SKIPPED 告警，改为 DONE 后自动解除对应用药告警。
@@ -117,6 +119,8 @@ Get-Content -Raw -Encoding UTF8 数据库/daily_task_upgrade.sql | docker compos
 GitHub Actions 的 `CI` 工作流在 main 推送、面向 main 的 PR（含草稿）及手动触发时运行：后端 JDK 8 完整构建和独立 MySQL/Redis 集成测试、前端 Node 24 全新 `npm ci` 与生产构建、Python 3.12 全量服务依赖安装与 pytest，以及 Chromium 浏览器端到端回归。关键的七组后端集成测试（含真实认证会话生命周期）若未执行或被跳过，CI 会失败，避免仅单元测试通过。测试报告作为 artifact 保留7天；普通 ESLint 警告不会导致构建失败。
 
 CI 使用临时库和合成测试凭据，不读取本地 `.env`，不需要配置 GitHub Secrets，也不调用真实邮件或外部模型。浏览器 job 使用前两组检查产出的同一份 JAR/dist，在全新的 MySQL 和专用 Redis 上通过真实页面验证登录、老人分配与撤销、健康测量/告警、超过200条的全量同步、任务认领/转交/完成、用药登记及告警解除，不模拟业务接口响应。失败时保留截图、trace、后端日志和 JUnit 报告。OCR 测试仍按现有环境条件执行；当前测试使用 Windows Tesseract 路径，在 Linux runner 中会跳过。CI 不代替 BGE 质量评测、其他浏览器/移动端或完整本机一键启动验证。
+
+Python job 还会启动隔离的认证 Milvus/MinIO/etcd，验证真实向量索引在计算失败、磁盘失败、重试和删除后的状态；若这项测试缺失或跳过，CI 会失败。测试集合和数据卷在结束时清理。
 
 浏览器回归本地复现（先按前文构建 JAR 和前端 dist，`JAVA_HOME` 指向 JDK 8）：
 
