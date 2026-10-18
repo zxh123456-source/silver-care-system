@@ -42,6 +42,33 @@ class AuthLifecycleHttpIntegrationTest {
             assertCode(call(HttpMethod.GET,"/ai/daily/tasks",token,null),401);
         } finally { jdbc.update("UPDATE staff SET role_id=? WHERE id=4",role); }
     }
+    @Test void staffManagementCannotCreateOrModifyReservedAdministrators() {
+        String pass="staff-boundary-test-only", newAccount="13800000001";
+        jdbc.update("UPDATE staff SET pass=? WHERE id=4",new BCryptPasswordEncoder().encode(pass));
+        Long role=jdbc.queryForObject("SELECT role_id FROM staff WHERE id=4",Long.class);
+        Long permission=jdbc.queryForObject("SELECT id FROM auth WHERE url='/people/staff'",Long.class);
+        Long priorPermission=jdbc.queryForObject("SELECT COUNT(*) FROM role_auth WHERE role_id=? AND auth_id=?",Long.class,role,permission);
+        jdbc.update("INSERT INTO role_auth(role_id,auth_id,create_id,create_time,update_id,update_time) SELECT ?,a.id,1,NOW(),1,NOW() FROM auth a WHERE a.url='/people/staff' AND NOT EXISTS(SELECT 1 FROM role_auth r WHERE r.role_id=? AND r.auth_id=a.id)",role,role);
+        String token=login(4,pass,null).path("token").asText();
+        assertCode(call(HttpMethod.GET,"/staff/getRole",token,null),200);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM staff WHERE phone=?",Long.class,newAccount)).isZero();
+        try {
+            assertCode(call(HttpMethod.POST,"/staff/addStaff",token,map("roleId",1,"name","E2E伪超管","idNum","110101199001010000",
+                    "age",30,"sex","男","phone",newAccount,"email","e2eroot@example.com","address","测试","avator","test-avatar")),403);
+            assertCode(call(HttpMethod.PUT,"/staff/editStaff",token,map("id",4,"roleId",1)),403);
+            assertCode(call(HttpMethod.GET,"/staff/getStaffById?staffId=1",token,null),403);
+            assertCode(call(HttpMethod.PUT,"/staff/editStaff",token,map("id",1,"roleId",2)),403);
+            assertCode(call(HttpMethod.DELETE,"/staff/leaveStaff?staffId=1",token,null),403);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM staff WHERE phone=?",Long.class,newAccount)).isZero();
+            assertThat(jdbc.queryForObject("SELECT role_id FROM staff WHERE id=4",Long.class)).isEqualTo(role);
+            assertThat(jdbc.queryForObject("SELECT leave_flag FROM staff WHERE id=1",String.class)).isEqualTo("N");
+            assertCode(call(HttpMethod.GET,"/staff/getRole",token,null),200);
+        } finally {
+            jdbc.update("DELETE FROM staff WHERE phone=? AND name='E2E伪超管'",newAccount);
+            jdbc.update("UPDATE staff SET role_id=? WHERE id=4",role);
+            if(priorPermission==0) jdbc.update("DELETE FROM role_auth WHERE role_id=? AND auth_id=?",role,permission);
+        }
+    }
     @Test void realSessionRotationLogoutPermissionsAndStaffChangesUseConsistentStatusCodes() {
         String pass="auth-lifecycle-test-only";
         jdbc.update("UPDATE staff SET pass=? WHERE id IN(1,4)",new BCryptPasswordEncoder().encode(pass));

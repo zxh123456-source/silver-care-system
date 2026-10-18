@@ -57,6 +57,7 @@ public class StaffServiceImpl implements StaffService {
 
     @Override
     public Result addStaff(OperateStaffQuery query) {
+        assertManageableRole(query.getRoleId());
         // 验证手机号是否已被注册
         AssertUtil.isNull(staffFunc.getStaffByAccount(query.getPhone()), ExceptionEnum.PHONE_REPEAT);
         // 验证邮箱是否已被注册
@@ -74,9 +75,7 @@ public class StaffServiceImpl implements StaffService {
     @Override
     public Result getStaffById(Long staffId) {
         // 根据编号获取员工
-        Staff staff = staffMapper.selectById(staffId);
-        // 判断是否为空
-        AssertUtil.notNull(staff, ExceptionEnum.DATA_NOT_EXIST);
+        Staff staff = requireManageableStaff(staffId);
         // 转换实体
         OperateStaffVo operateStaffVo = BeanUtil.toBean(staff, OperateStaffVo.class);
         return Result.success(operateStaffVo);
@@ -84,6 +83,8 @@ public class StaffServiceImpl implements StaffService {
 
     @Override
     public Result editStaff(OperateStaffQuery query) {
+        requireManageableStaff(query.getId());
+        assertManageableRole(query.getRoleId());
         // 验证手机号是否已被注册
         Staff staffByPhone = staffFunc.getStaffByAccount(query.getPhone());
         boolean checkPhone = staffByPhone != null && !Objects.equals(staffByPhone.getId(), query.getId());
@@ -103,6 +104,7 @@ public class StaffServiceImpl implements StaffService {
 
     @Override
     public Result leaveStaff(Long staffId) {
+        requireManageableStaff(staffId);
         // 封装修改
         Staff staff = new Staff();
         staff.setId(staffId);
@@ -112,5 +114,18 @@ public class StaffServiceImpl implements StaffService {
         // 删除该账号登录记录
         redisUtil.deleteObject(Constant.LOGIN_REDIS + staffId);
         return Result.success();
+    }
+
+    private Staff requireManageableStaff(Long staffId) {
+        AssertUtil.notNull(staffId, ExceptionEnum.DATA_NOT_EXIST);
+        Staff staff = staffMapper.selectById(staffId);
+        AssertUtil.notNull(staff, ExceptionEnum.DATA_NOT_EXIST);
+        assertManageableRole(staff.getRoleId());
+        return staff;
+    }
+
+    private void assertManageableRole(Long roleId) {
+        // The staff list and role selector exclude reserved administrators; direct calls must too.
+        AssertUtil.notTrue(Objects.equals(roleId, 1L), ExceptionEnum.AUTH_ERROR);
     }
 }

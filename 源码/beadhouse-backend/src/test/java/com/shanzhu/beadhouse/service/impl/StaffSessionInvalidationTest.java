@@ -2,6 +2,7 @@ package com.shanzhu.beadhouse.service.impl;
 
 import com.shanzhu.beadhouse.common.util.RedisUtil;
 import com.shanzhu.beadhouse.dao.mapper.StaffMapper;
+import com.shanzhu.beadhouse.entity.po.Staff;
 import com.shanzhu.beadhouse.entity.query.OperateStaffQuery;
 import com.shanzhu.beadhouse.service.common.StaffFunc;
 import org.junit.jupiter.api.Test;
@@ -19,12 +20,16 @@ class StaffSessionInvalidationTest {
     @Mock RedisUtil redisUtil;
     @InjectMocks StaffServiceImpl service;
     @Test void staffEditInvalidatesPreviouslyCachedRoleOnlyAfterSuccessfulWrite() {
+        Staff staff=new Staff(); staff.setId(4L); staff.setRoleId(5L);
+        when(staffMapper.selectById(4L)).thenReturn(staff);
         OperateStaffQuery query=new OperateStaffQuery(); query.setId(4L); query.setRoleId(7L);
         assertThat(service.editStaff(query).getCode()).isEqualTo(200);
         InOrder order=inOrder(staffMapper,redisUtil);
         order.verify(staffMapper).updateById(any()); order.verify(redisUtil).deleteObject("login:4");
     }
     @Test void failedEditDoesNotInvalidateTheSession() {
+        Staff staff=new Staff(); staff.setId(4L); staff.setRoleId(5L);
+        when(staffMapper.selectById(4L)).thenReturn(staff);
         OperateStaffQuery query=new OperateStaffQuery(); query.setId(4L); query.setRoleId(7L);
         doThrow(new IllegalStateException("test write failure")).when(staffMapper).updateById(any());
         assertThatThrownBy(() -> service.editStaff(query)).isInstanceOf(IllegalStateException.class);
