@@ -5,7 +5,8 @@ SET caregiver.pass=administrator.pass, caregiver.name='E2E护工', caregiver.lea
     caregiver.id_num='110101199001010000', caregiver.address='浏览器回归测试地址', caregiver.email='e2ecaregiver@example.com'
 WHERE caregiver.id=4;
 UPDATE elder SET check_flag='退住' WHERE id NOT IN(4,8);
-UPDATE elder SET name='E2E可见',check_flag='入住' WHERE id=4;
+UPDATE elder SET name='E2E可见',check_flag='入住',balance=100 WHERE id=4;
+UPDATE service_item SET name='E2E计费服务',charge_method='按次',price=12.50,need_date=10,del_flag='N' WHERE id=2;
 UPDATE elder SET name='E2E隔离',check_flag='入住' WHERE id=8;
 DELETE FROM elder_staff_assignment;
 INSERT INTO role_auth(role_id,auth_id,create_id,create_time,update_id,update_time)

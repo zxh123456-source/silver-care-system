@@ -3,6 +3,8 @@ package com.shanzhu.beadhouse.service.impl;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.ObjUtil;
 import com.shanzhu.beadhouse.common.constant.ConsumeEnum;
+import com.shanzhu.beadhouse.common.config.exception.BusinessRuntimeException;
+import com.shanzhu.beadhouse.service.common.BillingAmount;
 import com.shanzhu.beadhouse.common.constant.ExceptionEnum;
 import com.shanzhu.beadhouse.common.constant.YesNoEnum;
 import com.shanzhu.beadhouse.common.util.AssertUtil;
@@ -27,7 +29,6 @@ import org.springframework.transaction.annotation.Transactional;
 import javax.annotation.Resource;
 import java.math.BigDecimal;
 import java.util.*;
-import java.util.stream.Collectors;
 
 @Service
 public class OrderServiceImpl implements OrderService {
@@ -74,16 +75,18 @@ public class OrderServiceImpl implements OrderService {
     @Transactional
     public Result addOrder(AddOrderQuery query) {
         dataScopeService.assertElderAccess(query.getElderId());
+        if (query.getOrderDishesList() == null || query.getOrderDishesList().isEmpty()) throw new BusinessRuntimeException(400, "请选择菜品");
+        Map<Long,Integer> dishesNumMap = new LinkedHashMap<>();
+        for (AddOrderQuery.AddOrderDishesQuery line : query.getOrderDishesList()) {
+            if (line == null || line.getDishesId() == null || line.getDishesId() <= 0) throw new BusinessRuntimeException(400, "菜品编号无效");
+            int quantity = BillingAmount.quantity(line.getOrderNum());
+            try { dishesNumMap.put(line.getDishesId(), Math.addExact(dishesNumMap.getOrDefault(line.getDishesId(), 0), quantity)); }
+            catch (ArithmeticException overflow) { throw new BusinessRuntimeException(400, "菜品总份数过大"); }
+        }
         // 根据老人编号获取该老人所选套餐的菜品列表
         List<Dishes> elderSetDishesList = dishesMapper.listSetDishesByElderId(query.getElderId());
-        // 对所点菜品根据菜品编号进行分组
-        Map<Long, List<AddOrderQuery.AddOrderDishesQuery>> dishesNumMap = query.getOrderDishesList()
-                .parallelStream()
-                .collect(Collectors.groupingBy(AddOrderQuery.AddOrderDishesQuery::getDishesId));
         // 封装所点菜品编号列表
-        List<Long> dishesIdList = dishesNumMap.keySet()
-                .parallelStream()
-                .collect(Collectors.toList());
+        List<Long> dishesIdList = new ArrayList<>(dishesNumMap.keySet());
         // 根据编号列表获取菜品列表
         List<Dishes> dishesList = dishesMapper.selectBatchIds(dishesIdList);
         // 实例化支付总额
@@ -94,26 +97,26 @@ public class OrderServiceImpl implements OrderService {
             // 获取当前菜品信息
             Dishes dishes = dishesList.stream()
                     .filter(dishes0 -> Objects.equals(dishes0.getId(), dishesId))
-                    .collect(Collectors.toList())
-                    .get(0);
+                    .findFirst().orElseThrow(() -> new BusinessRuntimeException(400, "菜品不存在"));
+            if (!YesNoEnum.NO.getCode().equals(dishes.getDelFlag())) throw new BusinessRuntimeException(400, "菜品已停用");
+            BigDecimal price = BillingAmount.require(dishes.getPrice(), true);
             // 判断老人套餐中是否存在该菜品
-            boolean exist = elderSetDishesList.contains(dishes);
+            boolean exist = elderSetDishesList.stream().anyMatch(item -> Objects.equals(item.getId(), dishesId));
             // 获取点该菜品的总份数
-            Integer[] orderNum = {0};
-            dishesNumMap.get(dishesId).forEach(orderDishesQuery -> orderNum[0] += orderDishesQuery.getOrderNum());
+            int orderNum = dishesNumMap.get(dishesId);
             // 计算菜品总额
-            BigDecimal totalAmount = dishes.getPrice().multiply(BigDecimal.valueOf(orderNum[0]));
+            BigDecimal totalAmount = BillingAmount.require(price.multiply(BigDecimal.valueOf(orderNum)), true);
             // 计算实际总额
             BigDecimal reallyAmount = exist ?
-                    totalAmount.subtract(dishes.getPrice()) :
+                    totalAmount.subtract(price) :
                     totalAmount;
             // 计入支付总额
-            payAmount = payAmount.add(reallyAmount);
+            payAmount = BillingAmount.require(payAmount.add(reallyAmount), true);
             // 封装订单菜品实体
             OrderDishes orderDishes = new OrderDishes();
             orderDishes.setDishesName(dishes.getName());
             orderDishes.setDishesPrice(dishes.getPrice());
-            orderDishes.setOrderNum(orderNum[0]);
+            orderDishes.setOrderNum(orderNum);
             orderDishes.setSetFlag(exist ? YesNoEnum.YES.getCode() : YesNoEnum.NO.getCode());
             orderDishes.setTotalAmount(totalAmount);
             orderDishes.setReallyAmount(reallyAmount);
@@ -154,7 +157,7 @@ public class OrderServiceImpl implements OrderService {
     @Transactional
     public Result sendOrder(SendOrderQuery query) {
         // 根据编号获取订单
-        Order getOrderById = orderMapper.selectById(query.getId());
+        Order getOrderById = orderMapper.selectByIdForUpdate(query.getId());
         AssertUtil.notNull(getOrderById, ExceptionEnum.DATA_NOT_EXIST);
         dataScopeService.assertElderAccess(getOrderById.getElderId());
         // 判断订单是否已完成

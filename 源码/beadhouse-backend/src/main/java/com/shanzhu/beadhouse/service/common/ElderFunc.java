@@ -5,6 +5,7 @@ import cn.hutool.core.util.ObjUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.shanzhu.beadhouse.common.constant.CheckEnum;
+import com.shanzhu.beadhouse.common.config.security.handler.AuthorityAssert;
 import com.shanzhu.beadhouse.common.constant.ExceptionEnum;
 import com.shanzhu.beadhouse.common.util.AssertUtil;
 import com.shanzhu.beadhouse.dao.mapper.ElderMapper;
@@ -26,6 +27,8 @@ import java.util.stream.Collectors;
 public class ElderFunc extends ServiceImpl<ElderMapper, Elder> {
     @Resource
     private ElderMapper elderMapper;
+    @Resource
+    private AuthorityAssert authorityAssert;
 
     /**
      * 根据身份证号获取老人信息
@@ -322,14 +325,10 @@ public class ElderFunc extends ServiceImpl<ElderMapper, Elder> {
      * @param payAmount
      */
     public void deductionFee(Long elderId, BigDecimal payAmount) {
-        // 根据编号获取老人信息
-        Elder elder = elderMapper.selectById(elderId);
-        // 判断老人是否余额充足
-        boolean checkBalance = elder.getBalance().compareTo(payAmount) < 0;
-        AssertUtil.notTrue(checkBalance, ExceptionEnum.BALANCE_DEFICIENCY);
-        // 初始化老人修改
-        elder.setBalance(elder.getBalance().subtract(payAmount));
-        // 修改老人
-        elderMapper.updateById(elder);
+        BigDecimal amount = BillingAmount.require(payAmount, true);
+        if (elderMapper.debitBalance(elderId, amount, authorityAssert.getLoginUserId()) != 1) {
+            AssertUtil.notNull(elderMapper.selectById(elderId), ExceptionEnum.DATA_NOT_EXIST);
+            AssertUtil.isTrue(false, ExceptionEnum.BALANCE_DEFICIENCY);
+        }
     }
 }

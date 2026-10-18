@@ -1,6 +1,10 @@
 package com.shanzhu.beadhouse.service.impl;
 
 import com.shanzhu.beadhouse.common.constant.CheckEnum;
+import com.shanzhu.beadhouse.common.config.exception.BusinessRuntimeException;
+import com.shanzhu.beadhouse.common.config.security.handler.AuthorityAssert;
+import com.shanzhu.beadhouse.service.common.BillingAmount;
+import java.math.BigDecimal;
 import com.shanzhu.beadhouse.common.constant.ExceptionEnum;
 import com.shanzhu.beadhouse.common.util.AssertUtil;
 import com.shanzhu.beadhouse.common.util.PageUtil;
@@ -32,6 +36,8 @@ public class DepositRechargeServiceImpl implements DepositRechargeService {
     private ElderMapper elderMapper;
     @Resource
     private PageUtil pageUtil;
+    @Resource
+    private AuthorityAssert authorityAssert;
 
     @Override
     public Result pageDepositRechargeByKey(PageDepositRechargeByKeyQuery query) {
@@ -52,16 +58,16 @@ public class DepositRechargeServiceImpl implements DepositRechargeService {
     @Override
     public Result recharge(RechargeQuery query) {
         dataScopeService.assertElderAccess(query.getElderId());
+        BigDecimal amount = BillingAmount.require(query.getAmount(), false);
         // 判断是否是入住老人
         Elder elder = elderMapper.selectById(query.getElderId());
         AssertUtil.notNull(elder, ExceptionEnum.DATA_NOT_EXIST);
         boolean checkFlag = Objects.equals(elder.getCheckFlag(), CheckEnum.ENTER.getStatus()) ||
                 Objects.equals(elder.getCheckFlag(), CheckEnum.EXIT_AUDIT.getStatus());
         AssertUtil.isTrue(checkFlag, ExceptionEnum.NOT_ENTER);
-        // 封装修改
-        elder.setBalance(query.getAmount().add(elder.getBalance()));
-        // 修改
-        elderMapper.updateById(elder);
+        if (elderMapper.creditBalance(query.getElderId(), amount, BillingAmount.MAXIMUM, authorityAssert.getLoginUserId()) != 1) {
+            throw new BusinessRuntimeException(409, "老人状态或余额已变化，请刷新后重试；余额不能超过99999999.99元");
+        }
         return Result.success();
     }
 }

@@ -3,6 +3,10 @@ package com.shanzhu.beadhouse.service.impl;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.ObjUtil;
 import com.shanzhu.beadhouse.common.constant.ChargeEnum;
+import com.shanzhu.beadhouse.common.config.exception.BusinessRuntimeException;
+import com.shanzhu.beadhouse.dao.mapper.ServiceItemMapper;
+import com.shanzhu.beadhouse.service.common.BillingAmount;
+import java.math.BigDecimal;
 import com.shanzhu.beadhouse.common.constant.ConsumeEnum;
 import com.shanzhu.beadhouse.common.constant.ExceptionEnum;
 import com.shanzhu.beadhouse.common.constant.YesNoEnum;
@@ -46,6 +50,8 @@ public class NurseReserveServiceImpl implements NurseReserveService {
     private ConsumeFunc consumeFunc;
     @Resource
     private PageUtil pageUtil;
+    @Resource
+    private ServiceItemMapper serviceItemMapper;
 
     @Override
     public Result pageNurseReserveByKey(PageNurseReserveByKeyQuery query) {
@@ -72,8 +78,21 @@ public class NurseReserveServiceImpl implements NurseReserveService {
     @Override
     public Result addNurseReserve(AddNurseReserveQuery query) {
         dataScopeService.assertElderAccess(query.getElderId());
-        // 初始化护理预定
-        NurseReserve nurseReserve = BeanUtil.toBean(query, NurseReserve.class);
+        if (query.getServiceId() == null || query.getServiceId() <= 0) throw new BusinessRuntimeException(400, "请选择服务项目");
+        int frequency = BillingAmount.quantity(query.getFrequency());
+        ServiceItem service = serviceItemMapper.selectById(query.getServiceId());
+        if (service == null || !YesNoEnum.NO.getCode().equals(service.getDelFlag()) || !ChargeEnum.ONCE.getMethod().equals(service.getChargeMethod())) {
+            throw new BusinessRuntimeException(400, "请选择有效的按次服务项目");
+        }
+        BigDecimal price = BillingAmount.require(service.getPrice(), true);
+        NurseReserve nurseReserve = new NurseReserve();
+        nurseReserve.setElderId(query.getElderId());
+        nurseReserve.setFrequency(frequency);
+        nurseReserve.setServiceName(service.getName());
+        nurseReserve.setServicePrice(price);
+        nurseReserve.setNeedDate(service.getNeedDate());
+        nurseReserve.setChargeMethod(service.getChargeMethod());
+        nurseReserve.setPayAmount(BillingAmount.require(price.multiply(BigDecimal.valueOf(frequency)), true));
         nurseReserve.setOrderFlag(YesNoEnum.NO.getCode());
         // 新增
         nurseReserveMapper.insert(nurseReserve);
@@ -89,7 +108,7 @@ public class NurseReserveServiceImpl implements NurseReserveService {
     @Transactional
     public Result executeNurseReserve(ExecuteNurseReserveQuery query) {
         // 根据编号获取护理预定
-        NurseReserve getNurseReserveById = nurseReserveMapper.selectById(query.getId());
+        NurseReserve getNurseReserveById = nurseReserveMapper.selectByIdForUpdate(query.getId());
         AssertUtil.notNull(getNurseReserveById, ExceptionEnum.DATA_NOT_EXIST);
         dataScopeService.assertElderAccess(getNurseReserveById.getElderId());
         // 判断订单是否已完成

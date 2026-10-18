@@ -3,6 +3,7 @@ import contextlib
 import base64
 import functools
 import json
+import re
 import threading
 import time
 import urllib.error
@@ -174,6 +175,51 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
                 expect(editor.get_by_text("请选择上传员工头像", exact=True)).to_be_visible()
                 editor.get_by_role("button", name="取消", exact=True).click()
                 record("uploaded avatar persists and removing it clears the form value")
+                admin.goto(origin + "/#/charge/prestore")
+                account = admin.locator(".el-table__body tbody tr").filter(has_text="E2E可见")
+                expect(account).to_have_count(1)
+                expect(account.locator("td").nth(5)).to_have_text(re.compile(r"^\s*100(?:\.0{1,2})?\s*$"))
+                account.get_by_role("button", name="账户充值", exact=True).click()
+                payment = admin.get_by_role("dialog", name="账户充值", exact=True)
+                payment.locator(".el-input__inner").fill("10.00")
+                credits = []
+                admin.on("request", lambda request: credits.append(request) if "/api/depositRecharge/recharge" in request.url else None)
+                with admin.expect_response(lambda response: "/api/depositRecharge/recharge" in response.url) as credited:
+                    payment.get_by_role("button", name="提交", exact=True).evaluate("button => { button.click(); button.click(); }")
+                assert credited.value.json()["code"] == 200
+                expect(payment).not_to_be_visible()
+                expect(account.locator("td").nth(5)).to_have_text(re.compile(r"^\s*110(?:\.0{1,2})?\s*$"))
+                assert len(credits) == 1
+                record("recharge double-click submits once and the refreshed balance includes the credit")
+
+                admin.goto(origin + "/#/serve/book")
+                admin.get_by_role("button", name="新增", exact=True).click()
+                booking = admin.get_by_role("dialog", name="新增", exact=True)
+                booking.locator(".el-form-item").filter(has_text="老人姓名").get_by_role("button").click()
+                picker = admin.get_by_role("dialog", name="选择老人", exact=True)
+                picker.locator(".el-table__body tbody tr").filter(has_text="E2E可见").get_by_role("button", name="选择", exact=True).click()
+                admin.locator(".el-popconfirm__action .el-button--warning").click()
+                expect(picker).not_to_be_visible()
+                select_option(admin, booking.locator(".el-select"), "E2E计费服务")
+                expect(booking.locator(".el-form-item").filter(has_text="服务单价").locator("input")).to_have_value(re.compile(r"12\.50?"))
+                booking.locator(".el-form-item").filter(has_text="服务次数").locator("input").fill("2")
+                click_api(admin, booking.get_by_role("button", name="提交", exact=True), "/api/nurseReserve/addNurseReserve")
+                expect(booking).not_to_be_visible()
+                reservation = admin.locator(".el-table__body tbody tr").filter(has_text="E2E计费服务")
+                expect(reservation).to_have_count(1)
+                expect(reservation.locator("td").nth(7)).to_have_text(re.compile(r"^\s*25(?:\.0{1,2})?\s*$"))
+                reservation.get_by_role("button", name="执行", exact=True).click()
+                execution = admin.get_by_role("dialog", name="执行", exact=True)
+                select_option(admin, execution.locator(".el-select"), "E2E护工")
+                execution.locator(".el-date-editor input").fill("2026-10-18 08:00:00")
+                execution.locator(".el-date-editor input").press("Enter")
+                click_api(admin, execution.get_by_role("button", name="提交", exact=True), "/api/nurseReserve/executeNurseReserve", "PUT")
+                expect(execution).not_to_be_visible()
+                expect(reservation).to_contain_text("已完成")
+                expect(reservation.get_by_role("button", name="执行", exact=True)).not_to_be_visible()
+                admin.goto(origin + "/#/charge/prestore")
+                expect(admin.locator(".el-table__body tbody tr").filter(has_text="E2E可见").locator("td").nth(5)).to_have_text(re.compile(r"^\s*85(?:\.0{1,2})?\s*$"))
+                record("catalog-priced nursing reservation completes and deducts the exact charge")
                 route(admin, "/ai-care/scope", "老人数据权限")
                 choose_elder(admin)
                 select_option(admin, admin.locator(".toolbar .el-select"), "E2E护工")

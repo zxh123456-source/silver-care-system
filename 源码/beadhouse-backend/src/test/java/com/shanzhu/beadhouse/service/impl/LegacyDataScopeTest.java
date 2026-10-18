@@ -39,7 +39,7 @@ class LegacyDataScopeTest {
         ReflectionTestUtils.setField(service, "nurseReserveMapper", mapper);
         ReflectionTestUtils.setField(service, "elderFunc", elder); ReflectionTestUtils.setField(service, "consumeFunc", consume);
         NurseReserve record = new NurseReserve(); record.setId(99L); record.setElderId(8L);
-        when(mapper.selectById(99L)).thenReturn(record);
+        when(mapper.selectByIdForUpdate(99L)).thenReturn(record);
         ExecuteNurseReserveQuery query = new ExecuteNurseReserveQuery(); query.setId(99L);
         denied(() -> service.executeNurseReserve(query));
         verify(mapper, never()).updateById(any()); verifyNoInteractions(elder, consume);
@@ -49,7 +49,7 @@ class LegacyDataScopeTest {
         OrderMapper mapper = mock(OrderMapper.class); ElderFunc elder = mock(ElderFunc.class); ConsumeFunc consume = mock(ConsumeFunc.class);
         ReflectionTestUtils.setField(service, "orderMapper", mapper);
         ReflectionTestUtils.setField(service, "elderFunc", elder); ReflectionTestUtils.setField(service, "consumeFunc", consume);
-        Order record = new Order(); record.setId(99L); record.setElderId(8L); when(mapper.selectById(99L)).thenReturn(record);
+        Order record = new Order(); record.setId(99L); record.setElderId(8L); when(mapper.selectByIdForUpdate(99L)).thenReturn(record);
         SendOrderQuery query = new SendOrderQuery(); query.setId(99L);
         denied(() -> service.sendOrder(query));
         verify(mapper, never()).updateById(any()); verifyNoInteractions(elder, consume);

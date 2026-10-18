@@ -4,9 +4,13 @@
       style="width: 70%"
       v-model="dialogVisible"
       :title="drawerProps.title"
+      :close-on-click-modal="!submitting"
+      :close-on-press-escape="!submitting"
+      :show-close="!submitting"
       destroy-on-close
     >
       <div>
+        <el-alert title="网络异常时请先核对账户余额，再决定是否重新充值。" type="info" :closable="false" class="mb-4" />
         <el-form
           :model="formData"
           class="login-form"
@@ -17,7 +21,7 @@
           <div class="flex justify-around flex-wrap">
             <div class="w-full md:w-1/2">
               <el-form-item label="充值金额（元）:" prop="amount">
-                <el-input v-model="formData.amount" clearable />
+                <el-input v-model="formData.amount" clearable :disabled="submitting" />
               </el-form-item>
             </div>
             <!-- 占位 -->
@@ -35,10 +39,11 @@
       </div>
       <template v-if="!drawerProps.isView" #footer>
       <span class="dialog-footer">
-        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button @click="dialogVisible = false" :disabled="submitting">取消</el-button>
         <el-button
           class="bg-blue"
           type="primary"
+          :loading="submitting"
           @click="handleSubmit"
         >
           提交
@@ -56,6 +61,7 @@ import { numberRule } from "@/utils/formRules";
 
 const ruleFormRef = ref<FormInstance | null>(null);
 const dialogVisible = ref(false);
+const submitting = ref(false);
 
 watch(dialogVisible, (value, oldValue, onCleanup) => {
   if (!value) {
@@ -101,11 +107,13 @@ const acceptParams = async (params: DialogProps) => {
 };
 
 //点击提交
-const handleSubmit = () => {
-  ruleFormRef.value!.validate(async valid => {
-    if (!valid) return;
-    try {
-      const res = await drawerProps.value.api!(formData.value);
+const handleSubmit = async () => {
+  if (submitting.value) return;
+  submitting.value = true;
+  try {
+      const valid = await ruleFormRef.value!.validate().catch(() => false);
+      if (!valid) return;
+      const res = await drawerProps.value.api!({ ...formData.value });
       if (res.code == 200) {
         ElMessage.success({
           message: res.msg
@@ -117,10 +125,11 @@ const handleSubmit = () => {
           message: res.msg
         });
       }
-    } catch (error) {
-      console.log(error);
-    }
-  });
+  } catch {
+    // The shared HTTP handler reports transport/authentication errors.
+  } finally {
+    submitting.value = false;
+  }
 };
 
 defineExpose({

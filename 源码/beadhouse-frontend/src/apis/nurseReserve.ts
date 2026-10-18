@@ -10,6 +10,7 @@ interface IPageNurseReserveByKey {
 
 interface IAddNurseReserve {
   elderId: number;
+  serviceId: number;
   serviceName: string;
   needDate: number;
   servicePrice: number;

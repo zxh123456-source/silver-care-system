@@ -6,6 +6,7 @@ import com.shanzhu.beadhouse.entity.query.PageOrderByKeyQuery;
 import com.shanzhu.beadhouse.entity.vo.GetOrderByIdVo;
 import com.shanzhu.beadhouse.entity.vo.PageOrderByKeyVo;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 
 import java.util.List;
 
@@ -18,6 +19,9 @@ import java.util.List;
  * @date: 2024-08-10
  */
 public interface OrderMapper extends BaseMapper<Order> {
+    @Select("SELECT * FROM `order` WHERE id=#{id} FOR UPDATE")
+    Order selectByIdForUpdate(@Param("id") Long id);
+
     /**
      * 根据关键字查询点餐列表
      *
