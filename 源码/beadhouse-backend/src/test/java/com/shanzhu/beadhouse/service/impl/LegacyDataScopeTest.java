@@ -56,10 +56,10 @@ class LegacyDataScopeTest {
     }
     @Test void accidentDetailsAndDeletionUseRecordOwner() {
         AccidentServiceImpl service = scoped(new AccidentServiceImpl());
-        AccidentMapper mapper = mock(AccidentMapper.class); AccidentFunc func = mock(AccidentFunc.class);
-        ReflectionTestUtils.setField(service, "accidentMapper", mapper); ReflectionTestUtils.setField(service, "accidentFunc", func);
+        AccidentMapper mapper = mock(AccidentMapper.class);
+        ReflectionTestUtils.setField(service, "accidentMapper", mapper);
         Accident record = new Accident(); record.setElderId(8L);
-        when(mapper.selectById(99L)).thenReturn(record); when(func.checkAccident(99L, true)).thenReturn(record);
+        when(mapper.selectById(99L)).thenReturn(record); when(mapper.selectByIdForUpdate(99L)).thenReturn(record);
         denied(() -> service.getAccidentById(99L)); denied(() -> service.deleteAccident(99L));
         verify(mapper, never()).getAccidentById(anyLong()); verify(mapper, never()).updateById(any());
     }

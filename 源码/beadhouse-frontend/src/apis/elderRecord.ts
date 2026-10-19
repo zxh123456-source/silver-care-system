@@ -1,4 +1,6 @@
 import { http } from "@/utils";
+import { isResourceSessionCurrent, requireWorkbookBlob, resourceSessionConfig } from "@/utils/authResource";
+import type { ResourceSession } from "@/utils/authResource";
 
 interface IPageElderByKey {
   name: string;
@@ -29,8 +31,13 @@ export const sexList = [
 ];
 
 // 导出excel
-export function exportExcel() {
-  return http.get("/api/elderRecord/exportExcel");
+export async function exportExcel(session: ResourceSession): Promise<Blob> {
+  const response = await http.get("/api/elderRecord/exportExcel", {
+    responseType: "blob", timeout: 60000, ...resourceSessionConfig(session)
+  });
+  const blob = await requireWorkbookBlob(response);
+  if (!isResourceSessionCurrent(session)) throw new Error("登录状态已变化，请重新导出");
+  return blob;
 }
 
 // 分页查询员工

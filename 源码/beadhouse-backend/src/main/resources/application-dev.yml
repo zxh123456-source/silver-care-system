@@ -99,8 +99,6 @@ ignore:
     - /account/login
     - /account/sendCode
     - /account/forget
-    - /upload/**
-    - /download/**
     - /doc.html
     - /webjars/**
     - /favicon.ico

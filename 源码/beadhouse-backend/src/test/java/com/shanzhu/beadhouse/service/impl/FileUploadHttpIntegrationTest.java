@@ -76,13 +76,17 @@ class FileUploadHttpIntegrationTest {
         String url = result.path("data").path("url").asText();
         Path path = Paths.get(jdbc.queryForObject("SELECT path FROM base_attachment WHERE id=?", String.class, id));
         try {
-            assertThat(url).matches("/upload/(img|file)/[0-9]{8}/[a-f0-9]{32}\\.(png|html)");
-            ResponseEntity<byte[]> download = http.getForEntity(url, byte[].class);
+            String requestPath = url.replaceFirst("^/api/", "/");
+            assertThat(http.getForEntity(requestPath, byte[].class).getStatusCodeValue()).isEqualTo(401);
+            assertThat(url).isEqualTo("/api/file/" + id + "/content");
+            HttpHeaders headers = new HttpHeaders(); headers.set("token", token);
+            ResponseEntity<byte[]> download = http.exchange(requestPath, HttpMethod.GET, new HttpEntity<>(headers), byte[].class);
             assertThat(download.getStatusCodeValue()).isEqualTo(200);
             assertThat(download.getBody()).isEqualTo(content);
             assertThat(download.getHeaders().getFirst("X-Content-Type-Options")).isEqualTo("nosniff");
             assertThat(download.getHeaders().getFirst("Content-Security-Policy")).contains("sandbox");
-            if (attachment) assertThat(download.getHeaders().getFirst("Content-Disposition")).isEqualTo("attachment");
+            assertThat(download.getHeaders().getCacheControl()).contains("no-store");
+            if (attachment) assertThat(download.getHeaders().getContentDisposition().getType()).isEqualTo("attachment");
             else assertThat(download.getHeaders().getContentType()).isEqualTo(MediaType.IMAGE_PNG);
             assertThat(jdbc.queryForObject("SELECT real_name FROM base_attachment WHERE id=?", String.class, id)).isEqualTo(filename);
         } finally {

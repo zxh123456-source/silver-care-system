@@ -1,7 +1,8 @@
 <template>
   <el-dropdown trigger="click">
     <span class="navbar-bg-hover">
-      <img :src="avator" />
+      <img v-if="avator" :src="avator" alt="头像" />
+      <span v-else aria-label="默认头像">●</span>
       <p v-if="username" class="dark:text-black">{{ username }}</p>
     </span>
     <template #dropdown>
@@ -89,11 +90,51 @@
 <script setup lang="ts">
 import store from '@/store'
 import { useRenderIcon } from '@/hooks/useIcons'
-import { reactive, ref } from 'vue'
+import { onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { captureResourceSession, fetchResourceImage, isResourceSessionCurrent } from '@/utils/authResource'
+import type { ResourceImage, ResourceSession } from '@/utils/authResource'
 import { editPass, forgetPass, getLogout, IEditPassImpl } from '@/apis/user'
 import { ElMessage, FormInstance, FormRules } from 'element-plus'
 
-const avator = store.state.app.userPeofile.avator
+const avator = ref('')
+let avatarImage: ResourceImage | undefined
+let avatarSession: ResourceSession | undefined
+let avatarGeneration = 0
+let avatarAlive = true
+function clearAvatar() {
+  avatarGeneration++
+  avatarImage?.release()
+  avatarImage = undefined
+  avator.value = ''
+}
+async function loadAvatar() {
+  clearAvatar()
+  const version = avatarGeneration
+  try {
+    avatarSession = captureResourceSession()
+    const captured = avatarSession
+    const value = store.state.app.userPeofile.avator
+    if (!value) return
+    const image = await fetchResourceImage(value, captured)
+    if (!avatarAlive || version !== avatarGeneration || !isResourceSessionCurrent(captured)) {
+      image.release()
+      return
+    }
+    avatarImage = image
+    avator.value = image.previewUrl
+  } catch { /* Unavailable historical avatars render the local placeholder. */ }
+}
+function onAvatarStorageChange() {
+  if (avatarSession && !isResourceSessionCurrent(avatarSession)) clearAvatar()
+}
+watch(() => [store.state.app.token, store.state.app.userPeofile?.userid, store.state.app.userPeofile?.avator],
+  loadAvatar, { immediate: true, flush: 'sync' })
+window.addEventListener('storage', onAvatarStorageChange)
+onBeforeUnmount(() => {
+  avatarAlive = false
+  clearAvatar()
+  window.removeEventListener('storage', onAvatarStorageChange)
+})
 const username = store.state.app.userPeofile.username
 const editPassVisible = ref(false)
 const ruleFormRef = ref<FormInstance | null>(null)

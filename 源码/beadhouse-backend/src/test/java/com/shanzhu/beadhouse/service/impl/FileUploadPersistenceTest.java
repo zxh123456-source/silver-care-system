@@ -13,6 +13,8 @@ import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.nio.file.*;
 import java.util.stream.Stream;
@@ -49,13 +51,44 @@ class FileUploadPersistenceTest {
     }
 
     @Test void successfulUploadKeepsOriginalNameOnlyInMetadata() throws Exception {
-        when(mapper.insert(any())).thenReturn(1);
+        successfulMetadataWrites();
         FileInfoVo info = (FileInfoVo) service.save(file(), Constant.STR_UPLOAD_FILE).getData();
-        assertThat(info.getUrl()).matches("http://127\\.0\\.0\\.1:9001/upload/file/[0-9]{8}/[a-f0-9]{32}\\.txt");
+        assertThat(info.getUrl()).isEqualTo("/api/file/73/content");
         ArgumentCaptor<BaseAttachment> captured = ArgumentCaptor.forClass(BaseAttachment.class);
         verify(mapper).insert(captured.capture());
         assertThat(captured.getValue().getRealName()).isEqualTo("护理说明.txt");
         assertThat(Files.readAllBytes(Paths.get(captured.getValue().getPath()))).isEqualTo(new byte[]{1, 2, 3});
+    }
+
+    @Test void canonicalUrlWriteFailureAlsoRemovesTheUncommittedFile() throws Exception {
+        successfulMetadataWrites();
+        when(mapper.updateCanonicalUrl(eq(73L),anyString())).thenReturn(0);
+        assertThatThrownBy(()->service.save(file(),Constant.STR_UPLOAD_FILE)).isInstanceOf(BusinessRuntimeException.class);
+        try(Stream<Path> files=Files.walk(temporary)) { assertThat(files.filter(Files::isRegularFile).count()).isZero(); }
+    }
+
+    @Test void enclosingTransactionRollbackRemovesTheUncommittedFile() throws Exception {
+        verifyCompletionCleanup(TransactionSynchronization.STATUS_ROLLED_BACK,0);
+    }
+
+    @Test void uncertainCommitDoesNotDeleteAPossiblyCommittedFile() throws Exception {
+        verifyCompletionCleanup(TransactionSynchronization.STATUS_UNKNOWN,1);
+    }
+
+    private void verifyCompletionCleanup(int status,long expectedFiles) throws Exception {
+        successfulMetadataWrites();
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.save(file(),Constant.STR_UPLOAD_FILE);
+            assertThat(TransactionSynchronizationManager.getSynchronizations()).isNotEmpty();
+            for(TransactionSynchronization synchronization:TransactionSynchronizationManager.getSynchronizations()) synchronization.afterCompletion(status);
+            try(Stream<Path> files=Files.walk(temporary)) { assertThat(files.filter(Files::isRegularFile).count()).isEqualTo(expectedFiles); }
+        } finally { TransactionSynchronizationManager.clearSynchronization(); }
+    }
+
+    private void successfulMetadataWrites() {
+        when(mapper.insert(any())).thenAnswer(invocation->{ ((BaseAttachment)invocation.getArgument(0)).setId(73L); return 1; });
+        when(mapper.updateCanonicalUrl(eq(73L),anyString())).thenReturn(1);
     }
 
     private MockMultipartFile file() {

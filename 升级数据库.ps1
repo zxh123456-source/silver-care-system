@@ -1,8 +1,8 @@
-# Back up the existing database before running. Never import the destructive demo dump here.
+﻿# Back up the existing database before running. Never import the destructive demo dump here.
 $ErrorActionPreference = 'Stop'
 $compose = Join-Path $PSScriptRoot 'docker-compose.yml'
 $docker = (Get-Command docker -ErrorAction Stop).Source
-foreach ($name in @('ai_care_upgrade.sql', 'daily_task_upgrade.sql', 'care_alert_upgrade.sql', 'recharge_ledger_upgrade.sql')) {
+foreach ($name in @('ai_care_upgrade.sql', 'daily_task_upgrade.sql', 'care_alert_upgrade.sql', 'recharge_ledger_upgrade.sql', 'attachment_access_upgrade.sql')) {
     $source = Join-Path $PSScriptRoot "数据库/$name"
     $containerPath = '/tmp/silvercare-upgrade-' + [Guid]::NewGuid().ToString('N') + '.sql'
     & $docker compose -f $compose cp $source "mysql:$containerPath"

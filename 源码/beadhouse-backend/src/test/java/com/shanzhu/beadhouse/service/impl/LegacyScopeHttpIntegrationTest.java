@@ -12,6 +12,7 @@ import org.springframework.http.*;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import java.io.InputStream;
+import java.io.ByteArrayInputStream;
 import java.nio.file.*;
 import java.util.*;
 import static org.assertj.core.api.Assertions.*;
@@ -61,13 +62,17 @@ class LegacyScopeHttpIntegrationTest {
             for(JsonNode row:page.path("data").path("list")) assertThat(row.path("elderName").asText()).isEqualTo("allowed");
         }
         Files.createDirectories(Paths.get("target/scope-exports/download"));
-        JsonNode export=call(HttpMethod.GET,"/elderRecord/exportExcel",staff,null);
-        assertThat(export.path("code").asInt()).isEqualTo(200);
-        String url=export.path("data").asText();
-        Path file=Paths.get("target/scope-exports/download",url.substring(url.lastIndexOf('/')+1));
-        try(InputStream input=Files.newInputStream(file); Workbook book=WorkbookFactory.create(input)) {
+        long exportedBefore;
+        try(java.util.stream.Stream<Path> files=Files.list(Paths.get("target/scope-exports/download"))) { exportedBefore=files.count(); }
+        HttpHeaders exportHeaders=new HttpHeaders(); exportHeaders.set("token",staff);
+        ResponseEntity<byte[]> export=http.exchange("/elderRecord/exportExcel",HttpMethod.GET,new HttpEntity<>(exportHeaders),byte[].class);
+        assertThat(export.getStatusCodeValue()).isEqualTo(200);
+        assertThat(export.getHeaders().getContentType()).isEqualTo(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"));
+        assertThat(export.getHeaders().getCacheControl()).contains("no-store");
+        try(InputStream input=new ByteArrayInputStream(export.getBody()); Workbook book=WorkbookFactory.create(input)) {
             assertThat(book.getSheetAt(0).getLastRowNum()).isEqualTo(1);
         }
+        try(java.util.stream.Stream<Path> files=Files.list(Paths.get("target/scope-exports/download"))) { assertThat(files.count()).isEqualTo(exportedBefore); }
         String before=fingerprint();
         denied(HttpMethod.PUT,"/depositRecharge/recharge",staff,map("elderId",8,"amount",1,"requestId",UUID.randomUUID().toString()));
         denied(HttpMethod.POST,"/nurseReserve/addNurseReserve",staff,map("elderId",8));
@@ -84,6 +89,11 @@ class LegacyScopeHttpIntegrationTest {
         denied(HttpMethod.GET,"/elderRecord/getElderRecordById?elderId=4",staff,null);
         assertThat(call(HttpMethod.GET,"/elderRecord/pageElderByKey?pageNum=1&pageSize=100",staff,null)
                 .path("data").path("total").asInt()).isZero();
+        ResponseEntity<byte[]> revokedExport=http.exchange("/elderRecord/exportExcel",HttpMethod.GET,new HttpEntity<>(exportHeaders),byte[].class);
+        assertThat(revokedExport.getStatusCodeValue()).isEqualTo(200);
+        try(Workbook book=WorkbookFactory.create(new ByteArrayInputStream(revokedExport.getBody()))) {
+            assertThat(book.getSheetAt(0).getLastRowNum()).isZero();
+        }
     }
     private String login(int id,String password) {
         String phone=jdbc.queryForObject("SELECT phone FROM staff WHERE id=?",String.class,id);

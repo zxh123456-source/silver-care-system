@@ -1,7 +1,6 @@
 package com.shanzhu.beadhouse.common.util;
 
 import cn.hutool.core.util.ObjUtil;
-import com.shanzhu.beadhouse.common.config.file.FileUploadConfigPropertity;
 import io.swagger.annotations.ApiModelProperty;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -11,9 +10,7 @@ import org.apache.poi.xssf.usermodel.XSSFColor;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.stereotype.Component;
 
-import javax.annotation.Resource;
 import java.io.ByteArrayOutputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
@@ -21,13 +18,10 @@ import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Component
 public class ExcelUtil {
-    @Resource
-    private FileUploadConfigPropertity fileUploadConfigPropertity;
 
     /**
      * @param dataList 导出数据列表
@@ -35,17 +29,13 @@ public class ExcelUtil {
      * @return
      * @throws IOException
      */
-    public String exportExcel(List<?> dataList, Class<?> aClass) throws IOException {
-        // 生成文件名
-        UUID fileName = UUID.randomUUID();
-        String filePath = fileUploadConfigPropertity.getWindows() + "/download/" + fileName + ".xlsx";
-        String requestPath = fileUploadConfigPropertity.getLocalHead() + "/download/" + fileName + ".xlsx";
-
+    public byte[] exportExcel(List<?> dataList, Class<?> aClass) throws IOException {
         // 获取表头以及getter名称
         List<Test> headerNameList = new ExcelUtil().getHeaderNameList(aClass);
 
         // 生成excel
         Workbook workbook = new XSSFWorkbook();
+        try {
         Sheet sheet = workbook.createSheet("Sheet1");
 
         // 表头样式
@@ -102,30 +92,23 @@ public class ExcelUtil {
                     contentJ++;
                 }
             } catch (NoSuchMethodException | InvocationTargetException | IllegalAccessException e) {
-                e.printStackTrace();
+                throw new IOException("导出字段读取失败", e);
             }
         }
 
         // 统一设置列宽
         int widthI = 1;
         for (Test test : headerNameList) {
-            sheet.setColumnWidth(widthI, test.getMaxLength() * 256);
+            sheet.setColumnWidth(widthI, Math.min(255, Math.max(10, test.getMaxLength())) * 256);
             widthI++;
         }
 
-        // 生成本地文件流
-        ByteArrayOutputStream byteArrayOutputStream = new ByteArrayOutputStream();
-        workbook.write(byteArrayOutputStream);
-        // 保存到本地
-        FileOutputStream fos = new FileOutputStream(filePath);
-        byteArrayOutputStream.writeTo(fos);
-        fos.close();
-        byteArrayOutputStream.close();
-
-        // 完成
-        workbook.close();
-
-        return requestPath;
+        // Return only authenticated response bytes; never create a public download file.
+        try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            workbook.write(output);
+            return output.toByteArray();
+        }
+        } finally { workbook.close(); }
     }
 
     // 表格设值

@@ -45,12 +45,10 @@ public class ElderRecordServiceImpl implements ElderRecordService {
     private ExcelUtil excelUtil;
 
     @Override
-    public Result exportExcel() throws IOException {
+    public byte[] exportExcel() throws IOException {
         // 获取长者列表
         List<PageElderByKeyVo> pageElderByKeyVoList = elderMapper.listElderByKey(new PageElderByKeyQuery(), dataScopeService.queryStaffId());
-        // 导出excel并返回requestPath
-        String requestPath = excelUtil.exportExcel(pageElderByKeyVoList, PageElderByKeyVo.class);
-        return Result.success(CodeEnum.SUCCESS.getMsg(), requestPath);
+        return excelUtil.exportExcel(pageElderByKeyVoList, PageElderByKeyVo.class);
     }
 
     @Override

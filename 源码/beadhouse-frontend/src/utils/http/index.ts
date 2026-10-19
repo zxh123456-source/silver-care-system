@@ -13,7 +13,14 @@ const axios = baseAxios.create({
 const publicAuthPaths = new Set(["/api/account/login", "/api/account/sendCode", "/api/account/forget"]);
 let redirectingToLogin = false;
 function requestPath(config?: AxiosRequestConfig): string {
-  return new URL(config?.url || "", window.location.origin).pathname;
+  try { return new URL(axios.getUri(config), window.location.origin).pathname; }
+  catch { return ""; }
+}
+export function isSameOriginApi(config?: AxiosRequestConfig): boolean {
+  try {
+    const url = new URL(axios.getUri(config), window.location.origin);
+    return url.origin === window.location.origin && /^https?:$/.test(url.protocol) && url.pathname.startsWith("/api/");
+  } catch { return false; }
 }
 function storedToken(): string | undefined {
   try {
@@ -22,6 +29,7 @@ function storedToken(): string | undefined {
   } catch { return undefined; }
 }
 function handleAuthFailure(data: any, status: number, config?: AxiosRequestConfig): boolean {
+  if (!isSameOriginApi(config)) return false;
   const expired = status === 401 || data?.code === 401 || (data?.code === 500 && data?.msg === "令牌无效");
   const forbidden = status === 403 || data?.code === 403;
   if (!expired && !forbidden) return false;
@@ -48,23 +56,34 @@ function handleAuthFailure(data: any, status: number, config?: AxiosRequestConfi
 // 请求拦截器
 axios.interceptors.request.use((config: any) => {
   const token = storedToken();
-  if (token && !publicAuthPaths.has(requestPath(config))) config.headers.token = token;
-  else delete config.headers.token;
+  if (token && isSameOriginApi(config) && !publicAuthPaths.has(requestPath(config))) config.headers.set("token", token);
+  else config.headers.delete("token");
   return config;
 });
 
+async function responseData(data: any, status: number): Promise<any> {
+  if (!(data instanceof Blob) || data.size > 1024 * 1024) return data;
+  const jsonType = data.type.toLowerCase().includes("json");
+  const prefix = (await data.slice(0, 64).text()).trimStart();
+  if (!jsonType && status < 400 && !prefix.startsWith("{") && !prefix.startsWith("[")) return data;
+  try { return JSON.parse(await data.text()); }
+  catch { return data; }
+}
+
 // 响应拦截器
 axios.interceptors.response.use(
-  (res: AxiosResponse) => {
-    if (handleAuthFailure(res.data, res.status, res.config)) return Promise.reject(res.data);
-    if (requestPath(res.config) === "/api/account/login" && res.data.code === 200) redirectingToLogin = false;
-    if (res.data.err === 1) {
-      return Promise.reject(res.data);
+  async (res: AxiosResponse) => {
+    const data = await responseData(res.data, res.status);
+    if (handleAuthFailure(data, res.status, res.config)) return Promise.reject(data);
+    if (isSameOriginApi(res.config) && requestPath(res.config) === "/api/account/login" && data?.code === 200) redirectingToLogin = false;
+    if (data?.err === 1) {
+      return Promise.reject(data);
     }
-    return res.data;
+    return data;
   },
-  err => {
-    const data = err.response?.data;
+  async err => {
+    if (baseAxios.isCancel(err)) return Promise.reject(err);
+    const data = await responseData(err.response?.data, err.response?.status || 0);
     if (!handleAuthFailure(data, err.response?.status, err.config)) {
       ElMessage.error(data?.msg || "请求失败，请稍后重试");
     }

@@ -77,7 +77,7 @@ jobs:
           MYSQL_PWD: scope-test-only
         run: |
           set -euo pipefail
-          for file in db_beadhouse.sql ai_care_upgrade.sql daily_task_upgrade.sql care_alert_upgrade.sql recharge_ledger_upgrade.sql; do
+          for file in db_beadhouse.sql ai_care_upgrade.sql daily_task_upgrade.sql care_alert_upgrade.sql recharge_ledger_upgrade.sql attachment_access_upgrade.sql; do
             docker exec -i -e MYSQL_PWD "$MYSQL_CONTAINER" \
               mysql --default-character-set=utf8mb4 -uroot db_beadhouse < "数据库/$file"
           done
@@ -93,7 +93,7 @@ jobs:
           exit 1
       - name: Build and run all backend tests
         run: mvn --batch-mode --no-transfer-progress -Dfile.encoding=UTF-8 verify
-      - name: Require all twelve integration suites to execute
+      - name: Require all thirteen integration suites to execute
         if: always()
         run: |
           python3 - <<'PY'
@@ -109,6 +109,7 @@ jobs:
               'PasswordResetGuardIntegrationTest',
               'AuthLifecycleHttpIntegrationTest',
               'FileUploadHttpIntegrationTest',
+              'AttachmentAccessHttpIntegrationTest',
               'BillingHttpIntegrationTest',
               'AdmissionScopeHttpIntegrationTest',
               'RechargeHttpIntegrationTest',
@@ -166,6 +167,8 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: Verify recharge intent and session boundaries
         run: npm run test:recharge
+      - name: Verify authenticated resources and binary errors
+        run: npm run test:resources
       - name: Build with TypeScript and ESLint checks
         run: npm run build
       - name: Upload verified frontend for browser tests

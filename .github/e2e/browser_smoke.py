@@ -1,5 +1,6 @@
 """Real browser -> local static proxy -> Spring Boot -> disposable MySQL/Redis."""
 import contextlib
+import io
 import base64
 import functools
 import json
@@ -8,6 +9,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import zipfile
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -35,7 +37,7 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
                 with contextlib.suppress(BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
                     self.send_response(response.status)
                     self.send_header("Content-Type", response.headers.get("Content-Type", "application/json"))
-                    for header in ("Content-Disposition", "Content-Security-Policy", "X-Content-Type-Options"):
+                    for header in ("Content-Disposition", "Content-Security-Policy", "X-Content-Type-Options", "Cache-Control", "Pragma"):
                         if response.headers.get(header): self.send_header(header, response.headers[header])
                     self.send_header("Content-Length", str(len(data)))
                     self.end_headers()
@@ -146,6 +148,9 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
                 employee.get_by_role("button", name="编辑", exact=True).click()
                 editor = admin.get_by_role("dialog", name="编辑", exact=True)
                 expect(editor).to_be_visible()
+                image_reads = []
+                admin.on("response", lambda response: image_reads.append(response)
+                         if re.search(r"/api/file/[0-9]+/content$", response.url) else None)
                 png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEUlEQVR4nGP4z8DA8B+MgBgAHfAD/dPQfSYAAAAASUVORK5CYII=")
                 with admin.expect_response(lambda response: "/api/file/uploadImg" in response.url) as uploaded:
                     editor.locator("input[type=file]").set_input_files({"name": "care.png", "mimeType": "image/png", "buffer": png})
@@ -153,28 +158,48 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
                 assert image_result["code"] == 200, image_result
                 image_url = image_result["data"]["url"]
                 expect(editor.locator(".el-upload-list__item")).to_have_count(1)
-                expect(editor.locator(".el-upload-list__item img")).to_have_attribute("src", image_url)
+                expect(editor.locator(".el-upload-list__item img")).to_have_attribute("src", re.compile(r"^blob:"))
                 admin.wait_for_function("() => { const i=document.querySelector('[role=dialog] .el-upload-list__item img'); return i && i.complete && i.naturalWidth===2; }")
+                preview_url = editor.locator(".el-upload-list__item img").get_attribute("src")
+                fetched = [response for response in image_reads if response.url == origin + image_url]
+                assert fetched and fetched[-1].status == 200
+                assert fetched[-1].request.headers.get("token")
+                assert "token=" not in fetched[-1].url and "no-store" in fetched[-1].headers.get("cache-control", "")
+                assert admin.request.get(origin + image_url).status == 401
                 with admin.expect_response(lambda response: "/api/file/uploadImg" in response.url) as invalid_image:
                     editor.locator("input[type=file]").set_input_files({"name": "forged.png", "mimeType": "image/png", "buffer": b"<html>not a picture</html>"})
                 assert invalid_image.value.json()["code"] == 400
                 expect(admin.get_by_text("图片内容无效", exact=True)).to_be_visible()
                 expect(editor.locator(".el-upload-list__item")).to_have_count(1)
-                expect(editor.locator(".el-upload-list__item img")).to_have_attribute("src", image_url)
+                expect(editor.locator(".el-upload-list__item img")).to_have_attribute("src", preview_url)
                 record("real image upload renders and a forged replacement preserves the saved image")
                 with admin.expect_request(lambda request: "/api/staff/editStaff" in request.url) as saved_request:
                     click_api(admin, editor.get_by_role("button", name="提交", exact=True), "/api/staff/editStaff", "PUT")
                 assert saved_request.value.post_data_json["avator"] == image_url
                 expect(editor).not_to_be_visible()
                 employee.get_by_role("button", name="编辑", exact=True).click()
-                expect(editor.locator(".el-upload-list__item img")).to_have_attribute("src", image_url)
+                expect(editor.locator(".el-upload-list__item img")).to_have_attribute("src", re.compile(r"^blob:"))
+                admin.wait_for_function("() => { const i=document.querySelector('[role=dialog] .el-upload-list__item img'); return i && i.complete && i.naturalWidth===2; }")
                 editor.locator(".el-upload-list__item").hover()
-                editor.locator(".el-upload-list__item-delete").click()
+                editor.get_by_role("button", name="移除图片", exact=True).click()
                 expect(editor.locator(".el-upload-list__item")).to_have_count(0)
                 editor.get_by_role("button", name="提交", exact=True).click()
                 expect(editor.get_by_text("请选择上传员工头像", exact=True)).to_be_visible()
                 editor.get_by_role("button", name="取消", exact=True).click()
                 record("uploaded avatar persists and removing it clears the form value")
+                admin.goto(origin + "/#/people/old")
+                with admin.expect_download() as downloaded, admin.expect_response(lambda response: "/api/elderRecord/exportExcel" in response.url) as exported:
+                    admin.get_by_role("button", name="导出", exact=True).click()
+                export_response = exported.value
+                assert export_response.status == 200 and export_response.request.headers.get("token")
+                assert "spreadsheetml.sheet" in export_response.headers.get("content-type", "")
+                assert "no-store" in export_response.headers.get("cache-control", "")
+                with zipfile.ZipFile(io.BytesIO(export_response.body())) as workbook:
+                    assert "xl/workbook.xml" in workbook.namelist()
+                    assert "E2E可见" in workbook.read("xl/sharedStrings.xml").decode("utf-8")
+                assert downloaded.value.suggested_filename.endswith(".xlsx")
+                downloaded.value.save_as(str(evidence / "elder-export.xlsx"))
+                record("authenticated workbook downloads directly without a public file URL")
                 admin.goto(origin + "/#/charge/prestore")
                 account = admin.locator(".el-table__body tbody tr").filter(has_text="E2E可见")
                 expect(account).to_have_count(1)
@@ -294,6 +319,7 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
 
                 staff = new_page("staff")
                 login(staff, "18428167423")
+                expect(staff.locator('img[alt="头像"]')).to_have_attribute("src", re.compile(r"^blob:"))
                 # Model a different account's pending receipt remaining in the same browser tab.
                 # A staff session must use its actual userid (4), not the legacy fixed app.uid (1).
                 staff.evaluate("([key, value]) => sessionStorage.setItem(key, value)", [pending_key, json.dumps(original)])
@@ -316,6 +342,7 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
                 other_tab = staff.context.new_page()
                 other_tab.set_default_timeout(30000)
                 login(other_tab, "13547584400")
+                expect(staff.locator('img[alt="头像"]')).to_have_count(0)
                 # Dispatch any already queued click without racing the closing animation.
                 # If the form has closed there are no buttons; if it remains, its handler must still refuse.
                 staff_payment.get_by_role("button", name="提交", exact=True).evaluate_all(
@@ -331,6 +358,7 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
                 login(admin, "13547584400")
                 login(staff, "18428167423")
                 record("switching accounts in another tab invalidates the old recharge form before sending")
+                record("an account switch clears the previous authenticated avatar preview")
 
                 staff.goto(origin + "/#/charge/prestore")
                 other_tab = staff.context.new_page()

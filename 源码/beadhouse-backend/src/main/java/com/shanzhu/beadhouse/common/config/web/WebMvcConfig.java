@@ -1,21 +1,14 @@
 package com.shanzhu.beadhouse.common.config.web;
 
-import com.shanzhu.beadhouse.common.config.file.FileTempPath;
 import lombok.AllArgsConstructor;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
-import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
-import org.springframework.web.servlet.HandlerInterceptor;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
-import java.nio.file.Paths;
 
 @Configuration
 @AllArgsConstructor
 public class WebMvcConfig implements WebMvcConfigurer {
-    private final FileTempPath fileTempPath;
 
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
@@ -26,28 +19,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
         registry.addResourceHandler("/swagger-*/**").addResourceLocations("classpath:/META-INF/resources/");
         registry.addResourceHandler("swagger-ui.html").addResourceLocations("classpath:/META-INF/resources/");
         registry.addResourceHandler("/webjars/**").addResourceLocations("classpath:/META-INF/resources/webjars/");
-        // 文件资源
-        registry.addResourceHandler("/download/**").addResourceLocations(resourceLocation(fileTempPath.downloadPath()));
-        registry.addResourceHandler("/upload/img/**").addResourceLocations(resourceLocation(fileTempPath.imgSrcPath()));
-        registry.addResourceHandler("/upload/video/**").addResourceLocations(resourceLocation(fileTempPath.videoSrcPath()));
-        registry.addResourceHandler("/upload/file/**").addResourceLocations(resourceLocation(fileTempPath.filePath()));
-    }
-
-    private String resourceLocation(String path) {
-        String location = Paths.get(path).toAbsolutePath().normalize().toUri().toString();
-        return location.endsWith("/") ? location : location + "/";
-    }
-
-    @Override
-    public void addInterceptors(InterceptorRegistry registry) {
-        registry.addInterceptor(new HandlerInterceptor() {
-            @Override public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
-                response.setHeader("X-Content-Type-Options", "nosniff");
-                response.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
-                if (request.getServletPath().startsWith("/upload/file/")) response.setHeader("Content-Disposition", "attachment");
-                return true;
-            }
-        }).addPathPatterns("/upload/**");
+        // Disk files are served exclusively by the authenticated FileController.
     }
 
     @Override

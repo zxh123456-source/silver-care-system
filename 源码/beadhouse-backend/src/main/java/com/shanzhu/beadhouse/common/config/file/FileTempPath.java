@@ -197,6 +197,51 @@ public class FileTempPath {
         return new BusinessRuntimeException(400, message);
     }
 
+    /** Resolve both paths on disk, so a stored path or symlink cannot escape configured storage. */
+    public Path readablePath(String storedPath) {
+        if (StrUtil.isBlank(storedPath)) throw new BusinessRuntimeException(404, "文件不存在");
+        try {
+            Path root = Paths.get(getRootPath()).toAbsolutePath().normalize().toRealPath();
+            Path target = Paths.get(storedPath).toAbsolutePath().normalize().toRealPath();
+            if (!target.startsWith(root)) throw new BusinessRuntimeException(403, "文件不在存储目录内");
+            if (!Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)) {
+                throw new BusinessRuntimeException(404, "文件不存在");
+            }
+            return target;
+        } catch (NoSuchFileException | InvalidPathException missing) {
+            throw new BusinessRuntimeException(404, "文件不存在，请重新上传");
+        } catch (IOException unavailable) {
+            throw new BusinessRuntimeException(503, "文件存储暂不可用，请稍后重试");
+        }
+    }
+
+    /** Legacy images have no trusted media metadata. Verify actual bytes before allowing inline display. */
+    public String verifiedLegacyImageType(Path path) {
+        try {
+            long length = Files.size(path);
+            if (length <= 0 || length > 2L * 1024 * 1024) return "application/octet-stream";
+            try (ImageInputStream input = ImageIO.createImageInputStream(path.toFile())) {
+                if (input == null) return "application/octet-stream";
+                Iterator<ImageReader> readers = ImageIO.getImageReaders(input);
+                if (!readers.hasNext()) return "application/octet-stream";
+                ImageReader reader = readers.next();
+                try {
+                    reader.setInput(input, true, true);
+                    String format = reader.getFormatName().toLowerCase(Locale.ROOT);
+                    if (!"png".equals(format) && !"jpeg".equals(format)) return "application/octet-stream";
+                    int width = reader.getWidth(0), height = reader.getHeight(0);
+                    if (width <= 0 || height <= 0 || width > 8192 || height > 8192
+                            || (long) width * height > 16_000_000L || reader.read(0) == null) {
+                        return "application/octet-stream";
+                    }
+                    return "png".equals(format) ? "image/png" : "image/jpeg";
+                } finally { reader.dispose(); }
+            }
+        } catch (IOException | RuntimeException invalid) {
+            return "application/octet-stream";
+        }
+    }
+
 
     /**
      * 文件上传 备查信息

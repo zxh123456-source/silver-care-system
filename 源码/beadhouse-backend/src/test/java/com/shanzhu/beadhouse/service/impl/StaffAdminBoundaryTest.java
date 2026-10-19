@@ -6,6 +6,7 @@ import com.shanzhu.beadhouse.dao.mapper.StaffMapper;
 import com.shanzhu.beadhouse.entity.po.Staff;
 import com.shanzhu.beadhouse.entity.query.OperateStaffQuery;
 import com.shanzhu.beadhouse.service.common.StaffFunc;
+import com.shanzhu.beadhouse.service.common.AttachmentAccessService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -21,6 +22,7 @@ class StaffAdminBoundaryTest {
     @Mock StaffMapper staffMapper;
     @Mock StaffFunc staffFunc;
     @Mock RedisUtil redisUtil;
+    @Mock AttachmentAccessService attachmentAccessService;
     @InjectMocks StaffServiceImpl service;
 
     @Test void cannotCreateReservedAdministratorOrPromoteOrdinaryStaff() {
@@ -28,7 +30,7 @@ class StaffAdminBoundaryTest {
         query.setRoleId(1L);
         forbidden(() -> service.addStaff(query));
         query.setId(4L);
-        when(staffMapper.selectById(4L)).thenReturn(staff(4L, 5L));
+        when(staffMapper.selectByIdForUpdate(4L)).thenReturn(staff(4L, 5L));
         forbidden(() -> service.editStaff(query));
         verify(staffMapper, never()).insert(any());
         verify(staffMapper, never()).updateById(any());
@@ -37,6 +39,7 @@ class StaffAdminBoundaryTest {
 
     @Test void protectsEveryAdministratorByRoleInsteadOfOnlyTheSeedAccountId() {
         when(staffMapper.selectById(42L)).thenReturn(staff(42L, 1L));
+        when(staffMapper.selectByIdForUpdate(42L)).thenReturn(staff(42L, 1L));
         OperateStaffQuery query = new OperateStaffQuery();
         query.setId(42L);
         query.setRoleId(5L);
@@ -49,9 +52,11 @@ class StaffAdminBoundaryTest {
 
     @Test void ordinaryStaffDetailsAndDepartureRemainAvailable() {
         when(staffMapper.selectById(4L)).thenReturn(staff(4L, 5L));
+        when(staffMapper.selectByIdForUpdate(4L)).thenReturn(staff(4L, 5L));
         assertThat(service.getStaffById(4L).getCode()).isEqualTo(200);
         assertThat(service.leaveStaff(4L).getCode()).isEqualTo(200);
         verify(staffMapper).updateById(argThat(value -> value.getId().equals(4L) && "Y".equals(value.getLeaveFlag())));
+        verify(attachmentAccessService).retire("STAFF", 4L);
         verify(redisUtil).deleteObject("login:4");
     }
 
