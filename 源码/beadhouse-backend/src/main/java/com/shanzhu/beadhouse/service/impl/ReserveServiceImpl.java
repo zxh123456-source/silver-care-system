@@ -1,6 +1,7 @@
 package com.shanzhu.beadhouse.service.impl;
 
 import cn.hutool.core.util.ObjUtil;
+import com.shanzhu.beadhouse.common.config.exception.BusinessRuntimeException;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.shanzhu.beadhouse.common.constant.BedEnum;
 import com.shanzhu.beadhouse.common.constant.CheckEnum;
@@ -32,6 +33,7 @@ import java.util.*;
 
 @Service
 public class ReserveServiceImpl implements ReserveService {
+    @Resource private AiDataScopeService dataScopeService;
     @Resource
     private CommonFunc commonFunc;
     @Resource
@@ -60,7 +62,7 @@ public class ReserveServiceImpl implements ReserveService {
     @Override
     public Result pageReserveByKey(PageReserveByKeyQuery query) {
         // 根据条件获取老人信息
-        List<PageReserveByKeyVo> pageReserveByKeyVoList = reserveMapper.listReserveByKey(query);
+        List<PageReserveByKeyVo> pageReserveByKeyVoList = reserveMapper.listReserveByKey(query, dataScopeService.queryStaffId());
         // 封装返回数据
         PageResult<PageReserveByKeyVo> pageResult = pageUtil.packPageResultData(pageReserveByKeyVoList, query.getPageNum(), query.getPageSize());
         // 替换退款状态
@@ -105,6 +107,7 @@ public class ReserveServiceImpl implements ReserveService {
             // 新增
             reserveMapper.insert(reserve);
         } else {
+            dataScopeService.assertElderAccess(elderByIdNum.getId());
             // 判断该老人状态
             elderFunc.checkReserve(elderByIdNum);
             // 封装老人修改
@@ -129,6 +132,11 @@ public class ReserveServiceImpl implements ReserveService {
 
     @Override
     public Result getReserveByReserveIdAndElderId(GetReserveByReserveIdAndElderIdQuery query) {
+        AssertUtil.notNull(query.getReserveId(), ExceptionEnum.DATA_NOT_EXIST);
+        Reserve stored = reserveMapper.selectById(query.getReserveId());
+        AssertUtil.notNull(stored, ExceptionEnum.DATA_NOT_EXIST);
+        dataScopeService.assertElderAccess(stored.getElderId());
+        if (!Objects.equals(stored.getElderId(), query.getElderId())) throw new BusinessRuntimeException(403, "预订记录与老人不匹配");
         // 根据编号获取预定
         GetReserveByReserveIdAndElderIdVo getReserveByReserveIdAndElderIdVo = reserveMapper.getReserveByReserveIdAndElderId(query);
         // 判断是否为空
@@ -141,6 +149,8 @@ public class ReserveServiceImpl implements ReserveService {
     public Result refund(Long reserveId) {
         // 根据编号预定
         Reserve reserve = reserveMapper.selectById(reserveId);
+        AssertUtil.notNull(reserve, ExceptionEnum.DATA_NOT_EXIST);
+        dataScopeService.assertElderAccess(reserve.getElderId());
         // 判断是否为空
         AssertUtil.notNull(reserve, ExceptionEnum.DATA_NOT_EXIST);
         // 判断是否已退款

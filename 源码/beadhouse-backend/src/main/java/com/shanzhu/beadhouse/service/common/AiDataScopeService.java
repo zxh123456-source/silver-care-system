@@ -71,27 +71,22 @@ public class AiDataScopeService {
         if (elderId == null) throw new BusinessRuntimeException(400, "老人编号不能为空");
         Long staffId = queryStaffId();
         if (staffId == null) return;
-        Long count = assignmentMapper.selectCount(new QueryWrapper<ElderStaffAssignment>()
-                .eq("elder_id", elderId).eq("staff_id", staffId).eq("active", YesNoEnum.YES.getCode()));
-        if (count == null || count == 0) throw new BusinessRuntimeException(403, "无权访问该老人数据");
+        if (elderMapper.listAccessibleElderIds(staffId, Collections.singleton(elderId)).isEmpty())
+            throw new BusinessRuntimeException(403, "无权访问该老人数据");
     }
 
     public Set<Long> allowedElderIds(Collection<Long> candidateIds) {
         if (candidateIds == null || candidateIds.isEmpty()) return Collections.emptySet();
         Set<Long> candidates = new HashSet<>(candidateIds);
-        if (isAdmin()) return candidates;
-        List<ElderStaffAssignment> assignments = assignmentMapper.selectList(new QueryWrapper<ElderStaffAssignment>()
-                .eq("staff_id", authorityAssert.getLoginUserId())
-                .eq("active", YesNoEnum.YES.getCode())
-                .in("elder_id", candidates));
-        return assignments.stream().map(ElderStaffAssignment::getElderId).collect(Collectors.toSet());
+        Long staffId = queryStaffId();
+        if (staffId == null) return candidates;
+        return new HashSet<>(elderMapper.listAccessibleElderIds(staffId, candidates));
     }
 
     public Set<Long> currentAssignedElderIds() {
-        if (isAdmin()) return Collections.emptySet();
-        return assignmentMapper.selectList(new QueryWrapper<ElderStaffAssignment>()
-                .eq("staff_id", authorityAssert.getLoginUserId()).eq("active", YesNoEnum.YES.getCode()))
-                .stream().map(ElderStaffAssignment::getElderId).collect(Collectors.toSet());
+        Long staffId = queryStaffId();
+        if (staffId == null) return Collections.emptySet();
+        return new HashSet<>(elderMapper.listAccessibleElderIds(staffId, null));
     }
 
     public <T> void applyElderScope(QueryWrapper<T> query, String elderColumn) {

@@ -27,7 +27,7 @@ public interface ReserveMapper extends BaseMapper<Reserve> {
      * @param keyQuery
      * @return
      */
-    List<PageReserveByKeyVo> listReserveByKey(@Param("keyQuery") PageReserveByKeyQuery keyQuery);
+    List<PageReserveByKeyVo> listReserveByKey(@Param("keyQuery") PageReserveByKeyQuery keyQuery, @Param("scopeStaffId") Long scopeStaffId);
 
     /**
      * 根据预定编号和老人编号获取预定信息

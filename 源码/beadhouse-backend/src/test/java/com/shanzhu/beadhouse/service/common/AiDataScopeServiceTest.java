@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.shanzhu.beadhouse.common.config.exception.BusinessRuntimeException;
 import com.shanzhu.beadhouse.common.config.security.handler.AuthorityAssert;
 import com.shanzhu.beadhouse.dao.mapper.ElderStaffAssignmentMapper;
+import com.shanzhu.beadhouse.dao.mapper.ElderMapper;
+import java.util.Collections;
 import com.shanzhu.beadhouse.dao.mapper.StaffMapper;
 import com.shanzhu.beadhouse.entity.vo.LoginUserVo;
 import org.junit.jupiter.api.BeforeEach;
@@ -24,6 +26,7 @@ import static org.mockito.Mockito.when;
 class AiDataScopeServiceTest {
     @Mock private AuthorityAssert authorityAssert;
     @Mock private ElderStaffAssignmentMapper assignmentMapper;
+    @Mock private ElderMapper elderMapper;
     @Mock private StaffMapper staffMapper;
     @InjectMocks private AiDataScopeService service;
 
@@ -37,7 +40,7 @@ class AiDataScopeServiceTest {
         LoginUserVo user = new LoginUserVo(); user.setId(4L); user.setRoleId(5L);
         when(authorityAssert.getLoginUserInfo()).thenReturn(user);
         when(authorityAssert.getLoginUserId()).thenReturn(4L);
-        when(assignmentMapper.selectCount(any(Wrapper.class))).thenReturn(0L);
+        when(elderMapper.listAccessibleElderIds(org.mockito.ArgumentMatchers.eq(4L), any())).thenReturn(Collections.emptyList());
 
         assertThatThrownBy(() -> service.assertElderAccess(17L))
                 .isInstanceOf(BusinessRuntimeException.class)

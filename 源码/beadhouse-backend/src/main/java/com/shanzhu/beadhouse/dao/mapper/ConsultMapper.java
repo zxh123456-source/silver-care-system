@@ -30,7 +30,7 @@ public interface ConsultMapper extends BaseMapper<Consult> {
      */
     List<PageConsultByKeyVo> listConsultByKey(@Param("keyQuery") PageConsultByKeyQuery keyQuery,
                                               @Param("startTime") Date startTime,
-                                              @Param("endTime") Date endTime);
+                                              @Param("endTime") Date endTime, @Param("scopeStaffId") Long scopeStaffId);
 
     /**
      * 根据咨询人编号和老人编号查询咨询信息

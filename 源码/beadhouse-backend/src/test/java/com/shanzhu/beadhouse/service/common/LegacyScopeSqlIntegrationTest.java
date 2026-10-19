@@ -25,6 +25,9 @@ class LegacyScopeSqlIntegrationTest {
             try {
                 Connection conn = session.getConnection();
                 try (Statement st = conn.createStatement()) {
+                    // This suite verifies assignment-only care stages. Historical sales links in
+                    // the demo dump must not turn unrelated pre-admission rows into allowed rows.
+                    st.executeUpdate("UPDATE elder SET check_flag='入住'");
                     st.executeUpdate("UPDATE elder SET name='allowed',check_flag='退住审核' WHERE id=4");
                     st.executeUpdate("UPDATE elder SET name='foreign',check_flag='退住审核' WHERE id=8");
                     st.executeUpdate("DELETE FROM elder_staff_assignment");

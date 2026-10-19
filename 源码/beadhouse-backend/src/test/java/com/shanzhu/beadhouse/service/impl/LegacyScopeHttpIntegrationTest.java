@@ -32,6 +32,9 @@ class LegacyScopeHttpIntegrationTest {
         String hash=new BCryptPasswordEncoder().encode(password);
         jdbc.update("UPDATE staff SET pass=? WHERE id IN (1,4)",hash);
         jdbc.update("INSERT INTO role_auth(role_id,auth_id,create_id,create_time,update_id,update_time) SELECT 5,a.id,1,NOW(),1,NOW() FROM auth a WHERE NOT EXISTS(SELECT 1 FROM role_auth r WHERE r.role_id=5 AND r.auth_id=a.id)");
+        // Keep this regression about assigned residents; pre-admission ownership has a separate
+        // isolated HTTP suite, and demo sales relationships must not alter these expectations.
+        jdbc.update("UPDATE elder SET check_flag='入住'");
         jdbc.update("UPDATE elder SET name='allowed',check_flag='入住' WHERE id=4");
         jdbc.update("UPDATE elder SET name='foreign',check_flag='入住' WHERE id=8");
         jdbc.update("DELETE FROM elder_staff_assignment");

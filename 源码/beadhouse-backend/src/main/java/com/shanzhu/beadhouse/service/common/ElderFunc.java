@@ -29,6 +29,17 @@ public class ElderFunc extends ServiceImpl<ElderMapper, Elder> {
     private ElderMapper elderMapper;
     @Resource
     private AuthorityAssert authorityAssert;
+    @Resource
+    private AiDataScopeService dataScopeService;
+
+    private LambdaQueryWrapper<Elder> accessibleQuery() {
+        LambdaQueryWrapper<Elder> query = new LambdaQueryWrapper<>();
+        if (dataScopeService.queryStaffId() != null) {
+            java.util.Set<Long> ids = dataScopeService.currentAssignedElderIds();
+            query.in(Elder::getId, ids.isEmpty() ? java.util.Collections.singleton(-1L) : ids);
+        }
+        return query;
+    }
 
     /**
      * 根据身份证号获取老人信息
@@ -75,7 +86,7 @@ public class ElderFunc extends ServiceImpl<ElderMapper, Elder> {
      * @return
      */
     public List<Elder> listElderByKey(String elderName, String elderPhone) {
-        return elderMapper.selectList(new LambdaQueryWrapper<Elder>()
+        return elderMapper.selectList(accessibleQuery()
                 .and(elderLambdaQueryWrapper -> {
                     elderLambdaQueryWrapper.isNotNull(Elder::getId);
                     if (ObjUtil.isNotEmpty(elderName)) {
@@ -97,7 +108,7 @@ public class ElderFunc extends ServiceImpl<ElderMapper, Elder> {
      * @return
      */
     public List<Elder> listElderByKey(String elderName, String elderPhone, String checkFlag) {
-        return elderMapper.selectList(new LambdaQueryWrapper<Elder>()
+        return elderMapper.selectList(accessibleQuery()
                 .and(elderLambdaQueryWrapper -> {
                     elderLambdaQueryWrapper.eq(Elder::getCheckFlag, checkFlag);
                     if (ObjUtil.isNotEmpty(elderName)) {
@@ -119,7 +130,7 @@ public class ElderFunc extends ServiceImpl<ElderMapper, Elder> {
      * @return
      */
     public List<Elder> listElderByKey(String elderName, String elderPhone, List<String> checkFlagList) {
-        return elderMapper.selectList(new LambdaQueryWrapper<Elder>()
+        return elderMapper.selectList(accessibleQuery()
                 .and(elderLambdaQueryWrapper -> {
                     elderLambdaQueryWrapper.isNotNull(Elder::getId);
                     if (ObjUtil.isNotEmpty(elderName)) {
@@ -148,7 +159,7 @@ public class ElderFunc extends ServiceImpl<ElderMapper, Elder> {
      * @return
      */
     public List<Elder> listElderByKey(String elderName, String elderSex, String idNum, List<String> checkFlagList) {
-        return elderMapper.selectList(new LambdaQueryWrapper<Elder>()
+        return elderMapper.selectList(accessibleQuery()
                 .and(elderLambdaQueryWrapper -> {
                     elderLambdaQueryWrapper.isNotNull(Elder::getId);
                     if (ObjUtil.isNotEmpty(elderName)) {

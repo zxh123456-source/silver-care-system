@@ -275,6 +275,10 @@ public class RetreatAuditServiceImpl implements RetreatAuditService {
     @Transactional
     public Result auditElderFee(AuditElderFeeQuery query) {
         dataScopeService.assertElderAccess(query.getElderId());
+        AssertUtil.notNull(query.getApplyId(), ExceptionEnum.DATA_NOT_EXIST);
+        RetreatApply storedApplication = retreatApplyMapper.selectById(query.getApplyId());
+        AssertUtil.notNull(storedApplication, ExceptionEnum.DATA_NOT_EXIST);
+        AssertUtil.isTrue(Objects.equals(storedApplication.getElderId(), query.getElderId()), ExceptionEnum.AUTH_ERROR);
         // 验证审核结果是否合法
         boolean checkAuditResult = !Objects.equals(query.getAuditResult(), AuditEnum.PASS.getStatus()) &&
                 !Objects.equals(query.getAuditResult(), AuditEnum.NO_PASS.getStatus());

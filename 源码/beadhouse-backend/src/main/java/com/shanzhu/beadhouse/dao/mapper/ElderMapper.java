@@ -11,6 +11,7 @@ import org.apache.ibatis.annotations.Update;
 import java.math.BigDecimal;
 
 import java.util.List;
+import java.util.Collection;
 
 /**
  * <p>
@@ -21,6 +22,7 @@ import java.util.List;
  * @date: 2024-08-10
  */
 public interface ElderMapper extends BaseMapper<Elder> {
+    List<Long> listAccessibleElderIds(@Param("scopeStaffId") Long scopeStaffId, @Param("candidateIds") Collection<Long> candidateIds);
     @Update("UPDATE elder SET balance=balance+#{amount},update_id=#{staffId},update_time=NOW() " +
             "WHERE id=#{elderId} AND check_flag IN ('入住','退住审核') AND balance>=0 AND balance<=#{maximum}-#{amount}")
     int creditBalance(@Param("elderId") Long elderId, @Param("amount") BigDecimal amount,

@@ -4,10 +4,25 @@
     <!-- All callers use alias e for elder; the bound staff ID comes from the server session. -->
     <sql id="assignmentScope">
         <if test="scopeStaffId != null">
-            AND EXISTS (SELECT 1 FROM elder_staff_assignment esa
+            AND (EXISTS (SELECT 1 FROM elder_staff_assignment esa
                 WHERE esa.elder_id = e.id AND esa.staff_id = #{scopeStaffId} AND esa.active = 'Y')
+                OR (e.check_flag IN ('咨询中','意向跟进','预定') AND (
+                    e.create_id = #{scopeStaffId}
+                    OR EXISTS (SELECT 1 FROM consult ec WHERE ec.elder_id=e.id AND ec.staff_id=#{scopeStaffId})
+                    OR EXISTS (SELECT 1 FROM reserve er WHERE er.elder_id=e.id AND er.staff_id=#{scopeStaffId} AND er.reserve_flag='N')
+                )))
         </if>
     </sql>
+    <select id="listAccessibleElderIds" resultType="java.lang.Long">
+        SELECT e.id FROM elder e WHERE 1=1
+        <include refid="assignmentScope"/>
+        <if test="candidateIds != null">
+            <choose>
+                <when test="candidateIds.size() > 0">AND e.id IN <foreach collection="candidateIds" item="id" open="(" separator="," close=")">#{id}</foreach></when>
+                <otherwise>AND 1=0</otherwise>
+            </choose>
+        </if>
+    </select>
     <select id="listScopedElders" resultType="com.shanzhu.beadhouse.entity.po.Elder">
         SELECT e.* FROM elder e
         <where>
