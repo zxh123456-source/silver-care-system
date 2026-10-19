@@ -103,7 +103,7 @@ class CareAlertHttpIntegrationTest {
         JsonNode result=call("/account/login",null,map("phone",phone,"pass",password)); ok(result); return result.path("data").path("token").asText();
     }
     private JsonNode find(String token,String key) { JsonNode data=get("/ai/daily/alerts?state=ALL",token); ok(data); for(JsonNode row:data.path("data"))if(key.equals(row.path("alertKey").asText()))return row; throw new AssertionError("alert missing"); }
-    private void ok(JsonNode data) { assertThat(data.path("code").asInt()).isEqualTo(200); }
+    private void ok(JsonNode data) { assertThat(data.path("code").asInt()).as(data.toString()).isEqualTo(200); }
     private JsonNode get(String path,String token) { return request(HttpMethod.GET,path,token,null); }
     private JsonNode call(String path,String token,Object data) { return request(HttpMethod.POST,path,token,data); }
     private JsonNode request(HttpMethod method,String path,String token,Object data) {

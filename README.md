@@ -140,7 +140,7 @@ Get-Content -Raw -Encoding UTF8 数据库/daily_task_upgrade.sql | docker compos
 
 ## 配置回归检查
 
-GitHub Actions 的 `CI` 工作流在 main 推送、面向 main 的 PR（含草稿）及手动触发时运行：后端 JDK 8 完整构建和独立 MySQL/Redis 集成测试、前端 Node 24 全新 `npm ci` 与生产构建、Python 3.12 全量服务依赖安装与 pytest，以及 Chromium 浏览器端到端回归。关键的十一组后端集成测试（含咨询/来访/床位范围、认证会话、上传、充值幂等及资金并发/回滚）若未执行或被跳过，CI 会失败，避免仅单元测试通过。测试报告作为 artifact 保留7天；普通 ESLint 警告不会导致构建失败。
+GitHub Actions 的 `CI` 工作流在 main 推送、面向 main 的 PR（含草稿）及手动触发时运行：后端 JDK 8 完整构建和独立 MySQL/Redis 集成测试、前端 Node 24 全新 `npm ci` 与生产构建、Python 3.12 全量服务依赖安装与 pytest，以及 Chromium 浏览器端到端回归。关键的十二组后端集成测试（含咨询/来访/床位范围、认证会话、上传、充值幂等、资金并发/回滚及告警扫描并发）若未执行或被跳过，CI 会失败，避免仅单元测试通过。测试报告作为 artifact 保留7天；普通 ESLint 警告不会导致构建失败。
 
 CI 使用临时库和合成测试凭据，不读取本地 `.env`，不需要配置 GitHub Secrets，也不调用真实邮件或外部模型。浏览器 job 使用前两组检查产出的同一份 JAR/dist，在全新的 MySQL 和专用 Redis 上通过真实页面验证登录、老人分配与撤销、健康测量/告警、超过200条的全量同步、任务认领/转交/完成、用药登记及告警解除，不模拟业务接口响应。失败时保留截图、trace、后端日志和 JUnit 报告。OCR 测试仍按现有环境条件执行；当前测试使用 Windows Tesseract 路径，在 Linux runner 中会跳过。CI 不代替 BGE 质量评测、其他浏览器/移动端或完整本机一键启动验证。
 

@@ -9,6 +9,7 @@ import com.shanzhu.beadhouse.common.config.exception.BusinessRuntimeException;
 import com.shanzhu.beadhouse.common.config.security.handler.AuthorityAssert;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Isolation;
 import javax.annotation.Resource;
 import java.util.*;
 import java.text.SimpleDateFormat;
@@ -49,7 +50,8 @@ public class CareAlertService {
             execution.getExecutionDate(),"/ai-care/medication");
     }
 
-    @Transactional
+    // Keep plan/record serialization without a range gap lock blocking the next plan's insert.
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result scan(Date date) {
         Date today=day(new Date()), requested=day(date==null?new Date(today.getTime()-86400000L):date);
         if(!requested.before(today) || requested.before(new Date(today.getTime()-31L*86400000L)))

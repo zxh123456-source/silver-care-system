@@ -93,7 +93,7 @@ jobs:
           exit 1
       - name: Build and run all backend tests
         run: mvn --batch-mode --no-transfer-progress -Dfile.encoding=UTF-8 verify
-      - name: Require all eleven integration suites to execute
+      - name: Require all twelve integration suites to execute
         if: always()
         run: |
           python3 - <<'PY'
@@ -105,6 +105,7 @@ jobs:
               'LegacyScopeHttpIntegrationTest',
               'DailyTaskHttpIntegrationTest',
               'CareAlertHttpIntegrationTest',
+              'CareAlertConcurrencyHttpIntegrationTest',
               'PasswordResetGuardIntegrationTest',
               'AuthLifecycleHttpIntegrationTest',
               'FileUploadHttpIntegrationTest',
@@ -136,7 +137,9 @@ jobs:
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: backend-test-reports
-          path: 源码/beadhouse-backend/target/surefire-reports/
+          path: |
+            源码/beadhouse-backend/target/surefire-reports/
+            源码/beadhouse-backend/target/care-alert-concurrency-innodb.txt
           if-no-files-found: warn
           retention-days: 7
       - name: Remove authenticated test Redis
