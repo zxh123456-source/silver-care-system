@@ -69,7 +69,7 @@ class LegacyScopeHttpIntegrationTest {
             assertThat(book.getSheetAt(0).getLastRowNum()).isEqualTo(1);
         }
         String before=fingerprint();
-        denied(HttpMethod.PUT,"/depositRecharge/recharge",staff,map("elderId",8,"amount",1));
+        denied(HttpMethod.PUT,"/depositRecharge/recharge",staff,map("elderId",8,"amount",1,"requestId",UUID.randomUUID().toString()));
         denied(HttpMethod.POST,"/nurseReserve/addNurseReserve",staff,map("elderId",8));
         denied(HttpMethod.PUT,"/nurseReserve/executeNurseReserve",staff,map("id",reservation));
         denied(HttpMethod.PUT,"/order/sendOrder",staff,map("id",order));

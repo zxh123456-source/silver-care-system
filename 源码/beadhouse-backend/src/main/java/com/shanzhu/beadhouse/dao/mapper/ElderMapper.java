@@ -7,6 +7,7 @@ import com.shanzhu.beadhouse.entity.query.PageElderByKeyQuery;
 import com.shanzhu.beadhouse.entity.vo.PageDepositRechargeByKeyVo;
 import com.shanzhu.beadhouse.entity.vo.PageElderByKeyVo;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 import java.math.BigDecimal;
 
@@ -22,6 +23,9 @@ import java.util.Collection;
  * @date: 2024-08-10
  */
 public interface ElderMapper extends BaseMapper<Elder> {
+    @Select("SELECT * FROM elder WHERE id=#{id} FOR UPDATE")
+    Elder selectByIdForUpdate(@Param("id") Long id);
+
     List<Long> listAccessibleElderIds(@Param("scopeStaffId") Long scopeStaffId, @Param("candidateIds") Collection<Long> candidateIds);
     @Update("UPDATE elder SET balance=balance+#{amount},update_id=#{staffId},update_time=NOW() " +
             "WHERE id=#{elderId} AND check_flag IN ('入住','退住审核') AND balance>=0 AND balance<=#{maximum}-#{amount}")

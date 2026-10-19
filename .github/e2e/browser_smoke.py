@@ -220,6 +220,72 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
                 admin.goto(origin + "/#/charge/prestore")
                 expect(admin.locator(".el-table__body tbody tr").filter(has_text="E2E可见").locator("td").nth(5)).to_have_text(re.compile(r"^\s*85(?:\.0{1,2})?\s*$"))
                 record("catalog-priced nursing reservation completes and deducts the exact charge")
+
+                # The real server commits; only its response to this browser is lost.
+                # Refresh must restore the original business key, not send a new credit.
+                account.get_by_role("button", name="账户充值", exact=True).click()
+                payment.locator(".el-input__inner").fill("7.00")
+                lost_requests, lost_receipts = [], []
+
+                def lose_committed_recharge(intercept):
+                    lost_requests.append(intercept.request.post_data_json)
+                    committed = intercept.fetch()
+                    receipt = committed.json()
+                    assert committed.status == 200 and receipt["code"] == 200, receipt
+                    lost_receipts.append(receipt["data"])
+                    intercept.abort("failed")
+
+                recharge_pattern = "**/api/depositRecharge/recharge"
+                admin.route(recharge_pattern, lose_committed_recharge, times=1)
+                with admin.expect_event("requestfailed", predicate=lambda request: "/api/depositRecharge/recharge" in request.url):
+                    payment.get_by_role("button", name="提交", exact=True).click()
+                expect(payment.get_by_role("button", name="提交", exact=True)).to_be_enabled()
+                assert len(lost_requests) == len(lost_receipts) == 1
+                original = lost_requests[0]
+                pending_key = f'silver-care:recharge-intent:v1:1:{original["elderId"]}'
+                assert admin.evaluate("key => JSON.parse(sessionStorage.getItem(key))", pending_key) == original
+                admin.reload()
+                expect(account.locator("td").nth(5)).to_have_text(re.compile(r"^\s*92(?:\.0{1,2})?\s*$"))
+                account.get_by_role("button", name="账户充值", exact=True).click()
+                expect(payment.locator(".el-input__inner")).to_have_value("7.00")
+                expect(payment).to_contain_text("待确认充值")
+                with admin.expect_request(lambda request: "/api/depositRecharge/recharge" in request.url) as replay:
+                    receipt = click_api(admin, payment.get_by_role("button", name="提交", exact=True), "/api/depositRecharge/recharge", "PUT")
+                assert replay.value.post_data_json == original
+                assert receipt["data"] == lost_receipts[0]
+                expect(payment).not_to_be_visible()
+                expect(account.locator("td").nth(5)).to_have_text(re.compile(r"^\s*92(?:\.0{1,2})?\s*$"))
+                assert admin.evaluate("key => sessionStorage.getItem(key)", pending_key) is None
+                with admin.expect_response(lambda response: "/api/depositRecharge/pageRechargeLedger" in response.url) as ledger_result:
+                    account.get_by_role("button", name="充值记录", exact=True).click()
+                ledger = ledger_result.value.json()
+                assert ledger["code"] == 200 and ledger["data"]["total"] == 2, ledger
+                assert sum(row["requestId"] == original["requestId"] for row in ledger["data"]["list"]) == 1
+                ledger_dialog = admin.get_by_role("dialog", name="充值记录", exact=True)
+                expect(ledger_dialog.locator(".el-table__body tbody tr")).to_have_count(2)
+                ledger_dialog.locator(".el-dialog__headerbtn").click()
+                record("lost recharge response survives refresh and replays one immutable ledger receipt")
+
+                # A failed persistence write must stop the HTTP request before any money is moved.
+                account.get_by_role("button", name="账户充值", exact=True).click()
+                payment.locator(".el-input__inner").fill("8.00")
+                credit_count = len(credits)
+                admin.evaluate('''() => {
+                    window.originalStorageSetItem = Storage.prototype.setItem;
+                    Storage.prototype.setItem = function(key, value) {
+                        if (key.startsWith("silver-care:recharge-intent:")) throw new DOMException("fixture quota", "QuotaExceededError");
+                        return window.originalStorageSetItem.call(this, key, value);
+                    };
+                }''')
+                try:
+                    payment.get_by_role("button", name="提交", exact=True).click()
+                    expect(payment).to_contain_text("因此尚未提交")
+                    expect(payment.get_by_role("button", name="提交", exact=True)).to_be_disabled()
+                    assert len(credits) == credit_count
+                finally:
+                    admin.evaluate("() => { Storage.prototype.setItem = window.originalStorageSetItem; delete window.originalStorageSetItem; }")
+                payment.get_by_role("button", name="取消", exact=True).click()
+                record("recharge storage failure prevents a request and preserves the balance")
                 route(admin, "/ai-care/scope", "老人数据权限")
                 choose_elder(admin)
                 select_option(admin, admin.locator(".toolbar .el-select"), "E2E护工")
@@ -228,6 +294,66 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
 
                 staff = new_page("staff")
                 login(staff, "18428167423")
+                # Model a different account's pending receipt remaining in the same browser tab.
+                # A staff session must use its actual userid (4), not the legacy fixed app.uid (1).
+                staff.evaluate("([key, value]) => sessionStorage.setItem(key, value)", [pending_key, json.dumps(original)])
+                staff.goto(origin + "/#/charge/prestore")
+                staff.locator(".el-table__body tbody tr").filter(has_text="E2E可见").get_by_role("button", name="账户充值", exact=True).click()
+                staff_payment = staff.get_by_role("dialog", name="账户充值", exact=True)
+                expect(staff_payment.locator(".el-input__inner")).to_have_value("")
+                assert staff.evaluate("key => JSON.parse(sessionStorage.getItem(key))", pending_key) == original
+                staff_payment.get_by_role("button", name="取消", exact=True).click()
+                staff.evaluate("key => sessionStorage.removeItem(key)", pending_key)
+                record("another account's pending recharge is neither restored nor cleared")
+
+                # localStorage is shared by tabs, while each Vuex instance retains its own identity.
+                # Switching to an administrator elsewhere must invalidate this staff member's form.
+                staff.locator(".el-table__body tbody tr").filter(has_text="E2E可见").get_by_role("button", name="账户充值", exact=True).click()
+                staff_payment.locator(".el-input__inner").fill("3.00")
+                cross_account_requests = []
+                staff.on("request", lambda request: cross_account_requests.append(request.post_data_json)
+                         if "/api/depositRecharge/recharge" in request.url else None)
+                other_tab = staff.context.new_page()
+                other_tab.set_default_timeout(30000)
+                login(other_tab, "13547584400")
+                # Dispatch any already queued click without racing the closing animation.
+                # If the form has closed there are no buttons; if it remains, its handler must still refuse.
+                staff_payment.get_by_role("button", name="提交", exact=True).evaluate_all(
+                    "buttons => buttons.forEach(button => button.click())")
+                staff.wait_for_function('''() => {
+                    const dialog = [...document.querySelectorAll('[role="dialog"]')].find(node => node.getAttribute('aria-label') === '账户充值');
+                    return !dialog || !dialog.getClientRects().length || document.body.innerText.includes('充值回执与本次充值不一致');
+                }''')
+                assert not cross_account_requests, "Old tab submitted a recharge using another account: " + json.dumps(cross_account_requests)
+                expect(staff_payment).not_to_be_visible()
+                other_tab.close()
+                # The new administrator login superseded the earlier token; restore both real sessions.
+                login(admin, "13547584400")
+                login(staff, "18428167423")
+                record("switching accounts in another tab invalidates the old recharge form before sending")
+
+                staff.goto(origin + "/#/charge/prestore")
+                other_tab = staff.context.new_page()
+                other_tab.set_default_timeout(30000)
+                delayed_ledger = []
+
+                def deliver_old_ledger_after_login_changes(intercept):
+                    old_response = intercept.fetch()
+                    old_data = old_response.json()
+                    assert old_data["code"] == 200 and old_data["data"]["total"] == 2, old_data
+                    delayed_ledger.append(old_data)
+                    login(other_tab, "13547584400")
+                    intercept.fulfill(response=old_response)
+
+                staff.route("**/api/depositRecharge/pageRechargeLedger?*", deliver_old_ledger_after_login_changes, times=1)
+                with staff.expect_response(lambda response: "/api/depositRecharge/pageRechargeLedger" in response.url):
+                    staff.locator(".el-table__body tbody tr").filter(has_text="E2E可见").get_by_role("button", name="充值记录", exact=True).click()
+                assert len(delayed_ledger) == 1
+                expect(staff.get_by_role("dialog", name="充值记录", exact=True)).not_to_be_visible()
+                other_tab.close()
+                login(admin, "13547584400")
+                login(staff, "18428167423")
+                record("a delayed ledger response cannot reopen or populate a dialog after an account switch")
                 route(staff, "/ai-care/health", "健康趋势观察")
                 choose_elder(staff, scoped=True)
                 record("staff login and elder selector isolation")

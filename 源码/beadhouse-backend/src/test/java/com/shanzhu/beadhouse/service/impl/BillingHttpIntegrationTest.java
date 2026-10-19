@@ -51,7 +51,7 @@ class BillingHttpIntegrationTest {
 
     @Test void invalidCreditsNeverChangeTheBalance() {
         for (String value : Arrays.asList("-1", "0", "0.001", "100000000", null)) {
-            JsonNode result = call("/depositRecharge/recharge", map("elderId", 4, "amount", value));
+            JsonNode result = call("/depositRecharge/recharge", newRecharge(value));
             assertThat(result.path("code").asInt()).as("amount=%s", value).isEqualTo(400);
             assertBalance("100.00");
         }
@@ -59,10 +59,36 @@ class BillingHttpIntegrationTest {
 
     @Test void concurrentCreditsAllReachTheBalance() throws Exception {
         List<Callable<JsonNode>> credits = new ArrayList<>();
-        for (int index = 0; index < 6; index++) credits.add(() -> call("/depositRecharge/recharge", map("elderId", 4, "amount", "10.00")));
+        // Six independent business intents keep six distinct request IDs.
+        for (int index = 0; index < 6; index++) credits.add(() -> call("/depositRecharge/recharge", newRecharge("10.00")));
         List<JsonNode> results = contend("elder", 4L, credits);
         assertThat(results).allSatisfy(result -> assertThat(result.path("code").asInt()).isEqualTo(200));
         assertBalance("160.00");
+    }
+
+    @Test void replayingTheSameRechargeReturnsItsReceiptWithoutAnotherCredit() {
+        String requestId = UUID.randomUUID().toString();
+        Map<String, Object> request = map("elderId", 4, "amount", "10.00", "requestId", requestId);
+        JsonNode first = call("/depositRecharge/recharge", request);
+        JsonNode replay = call("/depositRecharge/recharge", request);
+        assertThat(first.path("code").asInt()).isEqualTo(200);
+        assertThat(replay.path("code").asInt()).isEqualTo(200);
+        assertBalance("110.00");
+        assertThat(first.path("data").path("requestId").asText()).isEqualTo(requestId);
+        assertThat(replay.path("data")).isEqualTo(first.path("data"));
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM deposit_recharge_ledger WHERE request_id=?", Long.class, requestId)).isEqualTo(1);
+    }
+
+    @Test void concurrentRetriesOfOneRechargeCreditOnlyOnce() throws Exception {
+        String requestId = UUID.randomUUID().toString();
+        List<Callable<JsonNode>> calls = new ArrayList<>();
+        for (int index = 0; index < 6; index++) calls.add(() -> call("/depositRecharge/recharge",
+                map("elderId", 4, "amount", "10.00", "requestId", requestId)));
+        List<JsonNode> results = contend("elder", 4L, calls);
+        assertThat(results).allSatisfy(result -> assertThat(result.path("code").asInt()).isEqualTo(200));
+        assertBalance("110.00");
+        assertThat(results).allSatisfy(result -> assertThat(result.path("data")).isEqualTo(results.get(0).path("data")));
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM deposit_recharge_ledger WHERE request_id=?", Long.class, requestId)).isEqualTo(1);
     }
 
     @ParameterizedTest @ValueSource(strings={"nurse_reserve", "order"})
@@ -93,7 +119,7 @@ class BillingHttpIntegrationTest {
     @Test void concurrentCreditAndDebitBothSurvive() throws Exception {
         long nursing = source("nurse_reserve", "20.00"), before = consumptionCount();
         List<JsonNode> results = contend("elder", 4L, Arrays.asList(
-                () -> call("/depositRecharge/recharge", map("elderId", 4, "amount", "10.00")), () -> execute("nurse_reserve", nursing)));
+                () -> call("/depositRecharge/recharge", newRecharge("10.00")), () -> execute("nurse_reserve", nursing)));
         assertThat(results).allSatisfy(result -> assertThat(result.path("code").asInt()).isEqualTo(200));
         assertBalance("90.00");
         assertThat(consumptionCount()).isEqualTo(before + 1);
@@ -102,15 +128,15 @@ class BillingHttpIntegrationTest {
     @Test void concurrentCreditsCannotExceedBalanceCapacity() throws Exception {
         jdbc.update("UPDATE elder SET balance=99999999.98 WHERE id=4");
         List<JsonNode> results = contend("elder", 4L, Arrays.asList(
-                () -> call("/depositRecharge/recharge", map("elderId", 4, "amount", "0.01")),
-                () -> call("/depositRecharge/recharge", map("elderId", 4, "amount", "0.01"))));
+                () -> call("/depositRecharge/recharge", newRecharge("0.01")),
+                () -> call("/depositRecharge/recharge", newRecharge("0.01"))));
         assertThat(results.stream().map(result -> result.path("code").asInt())).containsExactlyInAnyOrder(200, 409);
         assertBalance("99999999.99");
     }
 
     @Test void profileUpdatesCannotWriteBackAStaleBalance() {
         Elder stale = elders.selectById(4L);
-        assertThat(call("/depositRecharge/recharge", map("elderId", 4, "amount", "10.00")).path("code").asInt()).isEqualTo(200);
+        assertThat(call("/depositRecharge/recharge", newRecharge("10.00")).path("code").asInt()).isEqualTo(200);
         stale.setName("资金回归");
         elders.updateById(stale);
         assertBalance("110.00");
@@ -153,7 +179,7 @@ class BillingHttpIntegrationTest {
 
     @Test void creditBeyondBalanceCapacityIsAnExplicitConflict() {
         jdbc.update("UPDATE elder SET balance=99999999.98 WHERE id=4");
-        assertThat(call("/depositRecharge/recharge", map("elderId", 4, "amount", "0.02")).path("code").asInt()).isEqualTo(409);
+        assertThat(call("/depositRecharge/recharge", newRecharge("0.02")).path("code").asInt()).isEqualTo(409);
         assertBalance("99999999.98");
     }
 
@@ -262,6 +288,9 @@ class BillingHttpIntegrationTest {
     private long consumptionCount() { return jdbc.queryForObject("SELECT COUNT(*) FROM consume WHERE elder_id=4", Long.class); }
     private void assertBalance(String value) { assertThat(jdbc.queryForObject("SELECT balance FROM elder WHERE id=4", BigDecimal.class)).isEqualByComparingTo(value); }
     private JsonNode call(String path, Object body) { return request(HttpMethod.PUT, path, body); }
+    private Map<String, Object> newRecharge(String amount) {
+        return map("elderId", 4, "amount", amount, "requestId", UUID.randomUUID().toString());
+    }
     private JsonNode post(String path, Object body) { return request(HttpMethod.POST, path, body); }
     private JsonNode request(HttpMethod method, String path, Object body) {
         HttpHeaders headers = new HttpHeaders(); headers.setContentType(MediaType.APPLICATION_JSON); headers.set("token", token);

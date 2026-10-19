@@ -42,4 +42,20 @@ public class DepositRechargeController {
                            @ApiParam(value = "接口访问请求头", required = true) @RequestHeader String token) {
         return depositRechargeService.recharge(rechargeQuery);
     }
+
+    @GetMapping("/getRechargeReceipt")
+    @ApiOperation(value = "按充值单号查询凭证")
+    public Result getRechargeReceipt(@RequestParam Long elderId, @RequestParam String requestId,
+                                     @RequestHeader String token) {
+        return depositRechargeService.getRechargeReceipt(elderId, requestId);
+    }
+
+    @GetMapping("/pageRechargeLedger")
+    @ApiOperation(value = "分页查询老人充值流水")
+    public Result pageRechargeLedger(@RequestParam Long elderId,
+                                    @RequestParam(defaultValue = "1") Integer pageNum,
+                                    @RequestParam(defaultValue = "10") Integer pageSize,
+                                    @RequestHeader String token) {
+        return depositRechargeService.pageRechargeLedger(elderId, pageNum, pageSize);
+    }
 }

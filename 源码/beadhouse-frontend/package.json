@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "vue-cli-service serve",
     "build": "vue-cli-service build",
+    "test:recharge": "node --test scripts/recharge-contract.test.cjs",
     "lint": "vue-cli-service lint",
     "prettier": "prettier --write ."
   },
