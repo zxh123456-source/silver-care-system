@@ -136,6 +136,9 @@ ai:
     read-timeout-ms: ${AI_RAG_READ_TIMEOUT_MS:1500}
     top-k: ${AI_RAG_TOP_K:5}
     retry-interval-ms: ${AI_RAG_RETRY_INTERVAL_MS:30000}
+    lease-seconds: ${AI_RAG_LEASE_SECONDS:30}
+    retry:
+      enabled: ${AI_RAG_RETRY_ENABLED:true}
   ocr:
     enabled: ${AI_OCR_ENABLED:true}
     command: ${AI_OCR_COMMAND:tesseract}

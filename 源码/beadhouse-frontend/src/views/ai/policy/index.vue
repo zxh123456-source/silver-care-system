@@ -166,11 +166,11 @@ async function handleQuery() {
 }
 
 function syncText(status: string) {
-  return status === "SYNCED" ? "已同步" : status === "FAILED" ? "待重试" : status === "PENDING" ? "同步中" : "未同步";
+  return status === "SYNCED" ? "已同步" : status === "FAILED" ? "待重试" : ["PENDING", "PROCESSING"].includes(status) ? "同步中" : "未同步";
 }
 
 function syncTagType(status: string): "success" | "danger" | "warning" | "info" {
-  return status === "SYNCED" ? "success" : status === "FAILED" ? "danger" : status === "PENDING" ? "warning" : "info";
+  return status === "SYNCED" ? "success" : status === "FAILED" ? "danger" : ["PENDING", "PROCESSING"].includes(status) ? "warning" : "info";
 }
 
 loadDocuments();

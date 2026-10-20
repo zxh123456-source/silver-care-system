@@ -2,7 +2,7 @@ package com.shanzhu.beadhouse.service.common;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.shanzhu.beadhouse.entity.po.PolicyDoc;
+import com.shanzhu.beadhouse.entity.po.PolicyRagSync;
 import com.shanzhu.beadhouse.entity.vo.PolicyRagHitVo;
 import com.shanzhu.beadhouse.entity.vo.PolicyRagSearchVo;
 import org.springframework.beans.factory.annotation.Value;
@@ -40,27 +40,24 @@ public class PolicyRagClient {
         return enabled;
     }
 
-    public void indexDocument(String documentKey, String title, String source, List<PolicyDoc> docs) throws Exception {
-        Map<String, Object> body = new HashMap<>();
-        body.put("document_key", documentKey);
-        body.put("title", title);
-        body.put("source", source);
-        List<Map<String, Object>> chunks = new ArrayList<>();
-        for (PolicyDoc doc : docs) {
-            Map<String, Object> chunk = new HashMap<>();
-            chunk.put("chunk_id", doc.getId());
-            chunk.put("section_no", doc.getSectionNo());
-            chunk.put("content", doc.getContent());
-            chunks.add(chunk);
-        }
-        body.put("chunks", chunks);
-        client().postForEntity(url("/v1/documents/index"), request(body), String.class);
+    public void syncDocument(PolicyRagSync claim) throws Exception {
+        JsonNode payload=PolicyRagPayload.parse(claim.getPayloadJson());
+        if(!matches(payload,claim) || !claim.getRevision().equals(PolicyRagPayload.canonicalPayloadHash(payload)))
+            throw new IllegalStateException("制度同步快照身份不一致");
+        String response=client().postForObject(url("/v2/documents/sync"),request(payload),String.class);
+        JsonNode receipt=objectMapper.readTree(response);
+        if(receipt==null || !matches(receipt,claim) || !receipt.path("applied").isBoolean() || !receipt.path("applied").booleanValue())
+            throw new IllegalStateException("制度同步服务未确认对应版本");
     }
 
-    public void deleteDocument(String documentKey) {
-        Map<String, Object> body = new HashMap<>();
-        body.put("document_key", documentKey);
-        client().postForEntity(url("/v1/documents/delete"), request(body), String.class);
+    private boolean matches(JsonNode value,PolicyRagSync claim) {
+        return value!=null && value.path("document_key").isTextual() && value.path("action").isTextual()
+            && value.path("payload_hash").isTextual() && value.path("version").isIntegralNumber() && value.path("version").canConvertToLong()
+            && claim.getDesiredVersion()!=null && claim.getDesiredVersion()>0
+            && value.path("version").longValue()==claim.getDesiredVersion()
+            && claim.getDocumentKey().equals(value.path("document_key").asText())
+            && claim.getDesiredAction().equals(value.path("action").asText())
+            && claim.getRevision().equals(value.path("payload_hash").asText());
     }
 
     public PolicyRagSearchVo search(String question) throws Exception {
@@ -84,7 +81,7 @@ public class PolicyRagClient {
         return result;
     }
 
-    private HttpEntity<Map<String, Object>> request(Map<String, Object> body) {
+    private HttpEntity<Object> request(Object body) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.set("X-Internal-Token", internalToken);

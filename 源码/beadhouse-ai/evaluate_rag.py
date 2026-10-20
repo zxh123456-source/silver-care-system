@@ -10,6 +10,23 @@ from pathlib import Path
 
 import httpx
 
+from app.protocol import canonical_payload_hash
+
+
+def sync_document(client, document, version, action):
+    payload = dict(document, version=version, action=action)
+    if action == "DELETE":
+        payload["chunks"] = []
+    payload["payload_hash"] = canonical_payload_hash(
+        payload["document_key"], payload["title"], payload["source"], payload["chunks"], action)
+    response = client.post("/v2/documents/sync", json=payload)
+    response.raise_for_status()
+    accepted = response.json()
+    if accepted.get("applied") is not True or any(
+        accepted.get(key) != payload[key] for key in ("document_key", "version", "action", "payload_hash")
+    ):
+        raise ValueError("RAG sync response does not confirm the requested version")
+
 
 def percentile(values: list[float], value: float) -> float:
     if not values:
@@ -51,10 +68,12 @@ def main() -> int:
     negative_correct = 0
 
     with httpx.Client(base_url=base_url, headers=headers, timeout=20, trust_env=False) as client:
-        for document in documents:
-            response = client.post("/v1/documents/index", json=document)
-            response.raise_for_status()
+        attempted = []
         try:
+            for document in documents:
+                # Include a request whose response was lost after it committed.
+                attempted.append(document)
+                sync_document(client, document, 1, "UPSERT")
             client.post("/v1/query", json={"question": fixture["cases"][0]["question"], "top_k": 5}).raise_for_status()
             for case_index, case in enumerate(fixture["cases"], start=1):
                 started = time.perf_counter()
@@ -92,8 +111,14 @@ def main() -> int:
                     failures.append(f"negative case {case_index} returned citations")
                 print(f"negative={case_index} top={ids[:3]}")
         finally:
-            for document in documents:
-                client.post("/v1/documents/delete", json={"document_key": document["document_key"]})
+            cleanup_errors = []
+            for document in attempted:
+                try:
+                    sync_document(client, document, 2, "DELETE")
+                except Exception as error:
+                    cleanup_errors.append(f"{document['document_key']}: {type(error).__name__}")
+            if cleanup_errors:
+                raise RuntimeError("Evaluation cleanup incomplete: " + "; ".join(cleanup_errors))
 
     positive_count = len(fixture["cases"])
     negative_count = len(fixture["negative_cases"])

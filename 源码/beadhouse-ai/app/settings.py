@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     milvus_token: str = ""
     milvus_collection: str = "beadhouse_policy_chunks_v2"
 
+    @property
+    def versioned_milvus_collection(self) -> str:
+        return self.milvus_collection + "_v2"
+
     @field_validator("internal_token")
     @classmethod
     def validate_token(cls, value: str) -> str:

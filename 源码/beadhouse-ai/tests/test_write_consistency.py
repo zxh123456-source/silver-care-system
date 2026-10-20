@@ -10,16 +10,23 @@ from app.backend import BackendUnavailable, RetrievalBackend
 from app.milvus_backend import MilvusHybridBackend
 from app.settings import Settings
 from app.store import JsonDocumentStore
+from app.protocol import canonical_payload_hash
 
 
 def chunk(text="old", number=1):
     return {"chunk_id": number, "section_no": 1, "content": text}
 
 
+def write(target, key, title, source, chunks, version=1, action="UPSERT"):
+    digest = canonical_payload_hash(key, title, source, chunks, action)
+    operation = target.apply_sync if isinstance(target, JsonDocumentStore) else target.sync_document
+    return operation(key, version, action, digest, title, source, chunks)
+
+
 @pytest.mark.parametrize("operation", ["upsert", "delete"])
 def test_failed_file_replace_keeps_memory_and_disk_unchanged(tmp_path, monkeypatch, operation):
     store = JsonDocumentStore(tmp_path / "docs.json")
-    store.upsert_document("policy", "old title", "source", [chunk()])
+    write(store, "policy", "old title", "source", [chunk()])
     before, saved = store.all_chunks(), store.path.read_bytes()
     def fail_replace(*args):
         raise OSError("test replacement failure")
@@ -27,9 +34,9 @@ def test_failed_file_replace_keeps_memory_and_disk_unchanged(tmp_path, monkeypat
         patch.setattr(Path, "replace", fail_replace)
         with pytest.raises(OSError):
             if operation == "upsert":
-                store.upsert_document("policy", "new title", "source", [chunk("new", 2)])
+                write(store, "policy", "new title", "source", [chunk("new", 2)], 2)
             else:
-                store.delete_document("policy")
+                write(store, "policy", "old title", "source", [], 2, "DELETE")
     assert store.all_chunks() == before
     assert store.path.read_bytes() == saved
     assert JsonDocumentStore(store.path).all_chunks() == before
@@ -38,10 +45,10 @@ def test_failed_file_replace_keeps_memory_and_disk_unchanged(tmp_path, monkeypat
 
 def test_invalid_new_chunk_does_not_remove_the_previous_document(tmp_path):
     store = JsonDocumentStore(tmp_path / "docs.json")
-    store.upsert_document("policy", "title", "source", [chunk()])
+    write(store, "policy", "title", "source", [chunk()])
     before = store.all_chunks()
     with pytest.raises(ValueError):
-        store.upsert_document("policy", "new title", "source", [chunk("bad", "invalid-id")])
+        write(store, "policy", "new title", "source", [chunk("bad", "invalid-id")], 2)
     assert store.all_chunks() == before
 
 
@@ -64,7 +71,7 @@ def test_embedding_failure_does_not_delete_the_existing_milvus_document():
     index = MilvusHybridBackend.__new__(MilvusHybridBackend)
     index.client, index.collection, index.embedder = Client(), "test", EmbeddingFailure()
     with pytest.raises(RuntimeError, match="test model failure"):
-        index.upsert_document("policy", "title", "source", [chunk()])
+        index.upsert_document("policy", "title", "source", [chunk()], 1, "a" * 64)
     assert index.client.deleted == []
 
 
@@ -86,7 +93,7 @@ def test_failed_local_persistence_never_mutates_remote_index(tmp_path, monkeypat
     def fail_replace(*args): raise OSError("test disk failure")
     monkeypatch.setattr(Path, "replace", fail_replace)
     with pytest.raises(BackendUnavailable, match="storage"):
-        service.upsert_document("policy", "title", "source", [chunk()])
+        write(service, "policy", "title", "source", [chunk()])
     assert remote.calls == 0
     assert service.store.all_chunks() == []
 
@@ -104,18 +111,20 @@ def test_api_storage_failures_return503_without_changing_committed_data(tmp_path
     api = importlib.import_module("app.main")
     service = RetrievalBackend(Settings(_env_file=None, internal_token=token, embedding_backend="hashed"),
                                JsonDocumentStore(tmp_path / "committed.json"))
-    service.upsert_document("policy", "old", "source", [chunk()])
+    write(service, "policy", "old", "source", [chunk()])
     before = service.store.all_chunks()
     monkeypatch.setattr(api, "backend", service)
     monkeypatch.setattr(api, "settings", service.settings)
     def fail_replace(*args): raise OSError("private filesystem detail must not be returned")
     monkeypatch.setattr(Path, "replace", fail_replace)
-    payload = {"document_key": "policy"}
-    if operation == "index": payload.update(title="new", source="source", chunks=[chunk("new", 2)])
+    payload = dict(document_key="policy", version=2, action="UPSERT" if operation == "index" else "DELETE",
+                   title="new", source="source", chunks=[chunk("new", 2)] if operation == "index" else [])
+    payload["payload_hash"] = canonical_payload_hash(payload['document_key'], payload['title'], payload['source'],
+                                                      payload['chunks'], payload['action'])
     try:
         with TestClient(api.app) as http:
-            assert http.post(f"/v1/documents/{operation}", json=payload).status_code == 401
-            response = http.post(f"/v1/documents/{operation}", json=payload, headers={"X-Internal-Token": token})
+            assert http.post("/v2/documents/sync", json=payload).status_code == 401
+            response = http.post("/v2/documents/sync", json=payload, headers={"X-Internal-Token": token})
             assert response.status_code == 503
             assert response.json() == {"detail": "Document storage unavailable"}
         assert service.store.all_chunks() == before
@@ -127,15 +136,15 @@ def test_api_storage_failures_return503_without_changing_committed_data(tmp_path
 def test_overlapping_document_updates_cannot_publish_an_older_remote_version(tmp_path, monkeypatch):
     service = backend(tmp_path)
     first_entered, release_first, second_started, second_published = (threading.Event() for _ in range(4))
-    original = service.store.upsert_document
-    def observed_upsert(key, title, source, chunks):
-        count = original(key, title, source, chunks)
+    original = service.store.apply_sync
+    def observed_upsert(key, version, action, payload_hash, title, source, chunks):
+        count = original(key, version, action, payload_hash, title, source, chunks)
         if title == "second": second_published.set()
         return count
-    monkeypatch.setattr(service.store, "upsert_document", observed_upsert)
+    monkeypatch.setattr(service.store, "apply_sync", observed_upsert)
     class Remote:
         title = None
-        def upsert_document(self, key, title, source, chunks):
+        def upsert_document(self, key, title, source, chunks, version, payload_hash):
             if title == "first":
                 first_entered.set()
                 assert release_first.wait(5)
@@ -144,9 +153,9 @@ def test_overlapping_document_updates_cannot_publish_an_older_remote_version(tmp
     service._milvus = remote
     def second():
         second_started.set()
-        return service.upsert_document("policy", "second", "source", [chunk("second", 2)])
+        return write(service, "policy", "second", "source", [chunk("second", 2)], 2)
     with ThreadPoolExecutor(max_workers=2) as pool:
-        first = pool.submit(service.upsert_document, "policy", "first", "source", [chunk("first")])
+        first = pool.submit(write, service, "policy", "first", "source", [chunk("first")])
         assert first_entered.wait(5)
         later = pool.submit(second)
         assert second_started.wait(5)
@@ -158,4 +167,4 @@ def test_overlapping_document_updates_cannot_publish_an_older_remote_version(tmp
         first.result(timeout=5); later.result(timeout=5)
     assert midflight[0]["title"] == "first"
     assert remote.title == service.store.all_chunks()[0]["title"] == "second"
-    assert json.loads(service.store.path.read_text(encoding="utf-8"))[0]["title"] == "second"
+    assert json.loads(service.store.path.read_text(encoding="utf-8"))["documents"]["policy"]["title"] == "second"
