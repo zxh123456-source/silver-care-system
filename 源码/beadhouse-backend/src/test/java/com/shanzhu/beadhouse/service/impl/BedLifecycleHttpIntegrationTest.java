@@ -1,7 +1,17 @@
 package com.shanzhu.beadhouse.service.impl;
 
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.config.GlobalConfig;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import com.baomidou.mybatisplus.core.toolkit.GlobalConfigUtils;
+import com.baomidou.mybatisplus.extension.spring.MybatisSqlSessionFactoryBean;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.shanzhu.beadhouse.dao.mapper.EmergencyContactMapper;
+import com.shanzhu.beadhouse.entity.po.EmergencyContact;
 import com.shanzhu.beadhouse.service.ReserveService;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.apache.ibatis.session.Configuration;
+import org.apache.ibatis.session.SqlSessionFactory;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -9,7 +19,9 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.http.*;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import javax.sql.DataSource;
 import java.sql.*;
@@ -30,6 +42,7 @@ class BedLifecycleHttpIntegrationTest {
     @Autowired TestRestTemplate http;
     @Autowired JdbcTemplate jdbc;
     @Autowired DataSource dataSource;
+    @Autowired SqlSessionFactory sqlSessionFactory;
     @Autowired ReserveService reserveService;
     private String token;
     private boolean created;
@@ -339,6 +352,44 @@ class BedLifecycleHttpIntegrationTest {
         assertThat(jdbc.queryForObject("SELECT del_flag FROM room WHERE id=?",String.class,STRUCTURE)).isEqualTo("Y");
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM bed WHERE room_id=? AND del_flag='N'",Long.class,STRUCTURE)).isZero();
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM bed b JOIN room r ON r.id=b.room_id WHERE r.id=? AND r.del_flag='Y' AND b.del_flag='N'",Long.class,STRUCTURE)).isZero();
+    }
+
+    @Test void contactsRemainInTheAdmissionTransactionAfterAnotherFactoryIsInitialized() throws Exception {
+        expect(call(HttpMethod.POST,"/reserve/addReserve",reservation(FIRST,BED1)),200);
+        String before=fingerprint();
+        Configuration previousConfiguration=TableInfoHelper.getTableInfo(EmergencyContact.class).getConfiguration();
+        try {
+            // A second application context (or the standalone SQL suite) can replace MP's
+            // entity-global factory lookup while this HTTP server still uses its first factory.
+            DriverManagerDataSource secondDataSource=new DriverManagerDataSource(
+                    System.getenv("SCOPE_TEST_DB_URL"),"root",System.getenv("SCOPE_TEST_DB_PASSWORD"));
+            MybatisSqlSessionFactoryBean secondFactoryBean=new MybatisSqlSessionFactoryBean();
+            secondFactoryBean.setDataSource(secondDataSource);
+            secondFactoryBean.setConfiguration(new MybatisConfiguration());
+            GlobalConfig secondGlobalConfig=GlobalConfigUtils.defaults();
+            secondGlobalConfig.setMetaObjectHandler(GlobalConfigUtils
+                    .getGlobalConfig(sqlSessionFactory.getConfiguration()).getMetaObjectHandler());
+            secondFactoryBean.setGlobalConfig(secondGlobalConfig);
+            secondFactoryBean.setMapperLocations(new ClassPathResource("mapper/EmergencyContactMapper.xml"));
+            SqlSessionFactory secondFactory=secondFactoryBean.getObject();
+            assertThat(secondFactory).isNotSameAs(sqlSessionFactory);
+            assertThat(secondFactory.getConfiguration().getEnvironment().getDataSource()).isNotSameAs(dataSource);
+            assertThat(GlobalConfigUtils.currentSessionFactory(EmergencyContact.class)).isSameAs(secondFactory);
+
+            rejectInsert("contract");
+            ResponseEntity<JsonNode> response=call(HttpMethod.POST,"/checkContract/addCheckContract",contract(FIRST,BED2));
+            assertThat(response.getBody().path("code").asInt()).isEqualTo(500);
+            assertThat(fingerprint()).isEqualTo(before);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM emergency_contact WHERE elder_id=?",Long.class,FIRST)).isZero();
+        } finally {
+            try {
+                jdbc.execute("DROP TRIGGER IF EXISTS bed_test_reject_contract");
+            } finally {
+                MapperBuilderAssistant restore=new MapperBuilderAssistant(previousConfiguration,"restore-contact-factory");
+                restore.setCurrentNamespace(EmergencyContactMapper.class.getName());
+                TableInfoHelper.initTableInfo(restore,EmergencyContact.class);
+            }
+        }
     }
 
     @Test void failuresWritingContactsOrContractsRollBackTheWholeAdmissionAndCanBeRetried() {
