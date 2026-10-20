@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import subprocess
 from pathlib import Path
 import tempfile
 import unittest
@@ -122,6 +123,36 @@ class BackupValidationTests(unittest.TestCase):
         docker.inspect.return_value = {"id": container, "labels": {database.OWNER_LABEL: token}}
         database.remove_owned(docker, container, token)
         docker.run.assert_called_once_with(["rm", "-f", "-v", container], timeout=60)
+
+
+class GateReadinessTests(unittest.TestCase):
+    def test_unix_only_temporary_server_does_not_satisfy_final_server_readiness(self):
+        spec = importlib.util.spec_from_file_location("silvercare_migration_gate",
+                Path(__file__).resolve().parents[1] / ".github/database/check.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        gate = module.Gate.__new__(module.Gate)
+        gate.docker, gate.password = "docker-fixture", "readiness-test-only"
+        gate.containers = {"owned": "silvercare-migration-test-fixture"}
+        tcp_attempts = []
+
+        def run(arguments, *, data, expected):
+            self.assertEqual(data, b"SELECT 1")
+            self.assertIsNone(expected)
+            if "--protocol=TCP" in arguments and "--host=127.0.0.1" in arguments:
+                tcp_attempts.append(arguments)
+                # The entrypoint's temporary server has only a Unix socket.
+                # TCP becomes usable only when the final server is running.
+                return subprocess.CompletedProcess(arguments, 1 if len(tcp_attempts) == 1 else 0,
+                        b"1\n" if len(tcp_attempts) > 1 else b"", b"")
+            return subprocess.CompletedProcess(arguments, 0, b"1\n", b"")
+
+        gate.run = run
+        with mock.patch.object(module.time, "sleep") as sleep:
+            gate.ready("owned")
+        self.assertEqual(len(tcp_attempts), 2,
+                "a successful temporary Unix socket must not let the gate run migrations early")
+        sleep.assert_called_once_with(1)
 
 
 if __name__ == "__main__":

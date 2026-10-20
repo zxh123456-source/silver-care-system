@@ -124,7 +124,9 @@ class Gate:
 
     def mysql_args(self, cid):
         return [self.docker, "exec", "-i", "-e", f"MYSQL_PWD={self.password}", cid,
-                "mysql", "--default-character-set=utf8mb4", "-uroot", "-N", "-B"]
+                # The entrypoint's temporary Unix-only server is not final readiness.
+                "mysql", "--host=127.0.0.1", "--protocol=TCP",
+                "--default-character-set=utf8mb4", "-uroot", "-N", "-B"]
 
     def mysql(self, cid, sql, *, expected=0):
         return self.run(self.mysql_args(cid), data=sql.encode("utf-8"), expected=expected)
