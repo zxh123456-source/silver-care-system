@@ -41,10 +41,16 @@ Milvus 使用中文 BM25 sparse 检索、BGE 中文稠密向量检索与 RRF 融
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
-.\.venv\Scripts\python.exe evaluate_rag.py
+$env:RAG_TEST_MILVUS_URI="http://127.0.0.1:19530"
+$env:RAG_TEST_MILVUS_TOKEN="root:<隔离测试Milvus密码>"
+.\.venv\Scripts\python.exe run_rag_baseline.py --disposable-test --backend milvus --report-dir evals/reports/local
 ```
 
-评测脚本会临时导入测试制度、验证 citation recall@5 和 MRR，随后自动删除测试数据。
+评测器启动自己的FastAPI子进程、随机内部令牌、临时JSON和独立Milvus集合，不连接日常8001服务。`RAG_TEST_MILVUS_*` 只填写测试Milvus的地址和凭据；结束后只清理本次进程及集合。首次运行会通过FastEmbed下载公开BGE权重，可用 `FASTEMBED_CACHE_PATH` 指定缓存目录。显式hashed或模型加载失败不能通过BGE身份门禁。
+
+每次运行保存独立 `report.json`、`report.xml` 和服务日志，包含实际模型ONNX摘要/维度、依赖版本、语料摘要、源码指纹、逐题结果、预热和分组延迟。22条正例、3条检索拒答和2条注入拦截分别统计；正式至少3轮。门槛为Hit@5≥0.90、MRR≥0.80、Top1≥0.75、宏平均Recall@5≥0.90、多引用完整召回、拒答≥0.90、注入拦截1.0、引用ID合法且检索P95≤5000ms，同时要求真实BGE/Milvus且无降级。单题失败保留诊断，最终按聚合门槛判定；请求异常或清理不完整独立失败。这是当前小型合成制度语料的基线，不代表真实机构数据的泛化结论。
+
+[2026-10-20实际基线](evals/baselines/bge_milvus_20261020.json)：Windows AMD64、BGE 512维、Milvus，3轮81条正式样本及81条独立预热样本。Hit@5/宏平均Recall/多引用完整召回/检索拒答/安全拦截/引用合法性均1.0，MRR 0.9242、Top1 0.8636，正式检索P95 114.40ms，无降级。文件保留每题三轮结果、模型与源码指纹、固定门槛和清理确认。CI会重新下载/复用公开BGE并执行同一隔离门禁，不用hashed测试代替语义质量。
 
 ## 写入失败与恢复
 

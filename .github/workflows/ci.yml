@@ -325,12 +325,18 @@ jobs:
               assert not any(cases[0].find(tag) is not None for tag in ('skipped', 'failure', 'error')), f'Real Milvus regression did not pass: {name}'
               print(f'Real Milvus regression executed and passed: {name}')
           PY
+      - name: Require isolated real BGE and Milvus quality baseline
+        run: python run_rag_baseline.py --disposable-test --backend milvus --report-dir evals/reports/ci
       - name: Upload Python test report
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: python-test-reports
-          path: 源码/beadhouse-ai/test-results/pytest.xml
+          path: |
+            源码/beadhouse-ai/test-results/pytest.xml
+            源码/beadhouse-ai/evals/reports/ci/**/report.json
+            源码/beadhouse-ai/evals/reports/ci/**/report.xml
+            源码/beadhouse-ai/evals/reports/ci/**/service.log
           if-no-files-found: warn
           retention-days: 7
       - name: Remove disposable RAG infrastructure

@@ -1,5 +1,7 @@
 from fastapi import Depends, FastAPI, Header, HTTPException
 import secrets
+import os
+import uuid
 
 from .models import (
     SearchHit,
@@ -20,6 +22,16 @@ settings = get_settings()
 store = JsonDocumentStore(settings.data_file)
 backend = RetrievalBackend(settings, store)
 app = FastAPI(title="银龄智慧康护 RAG 服务", version="2.0.0")
+_instance_process = os.getpid()
+_instance_id = os.environ.get("RAG_INSTANCE_ID") or uuid.uuid4().hex
+
+
+def instance_id() -> str:
+    global _instance_process, _instance_id
+    if os.getpid() != _instance_process:
+        _instance_process = os.getpid()
+        _instance_id = os.environ.get("RAG_INSTANCE_ID") or uuid.uuid4().hex
+    return _instance_id
 
 
 def verify_token(x_internal_token: str | None = Header(default=None)) -> None:
@@ -31,11 +43,29 @@ def verify_token(x_internal_token: str | None = Header(default=None)) -> None:
 def health() -> dict:
     snapshot = store.snapshot()
     pending = backend.settings.backend.lower() == "milvus" and backend._pending(snapshot)
-    return {"status": "ok", "backend": backend.name, "embedding_backend": backend.embedder.name,
+    return {"status": "ok", "instance_id": instance_id(), "backend": backend.name, "embedding_backend": backend.embedder.name,
             "degraded": backend.embedder.degraded or pending or (backend.settings.backend.lower() == "milvus" and backend._milvus is None),
             "fallback_code": "INDEX_SYNC_PENDING" if pending else backend.embedder.fallback_code,
             "milvus_collection": backend.collection_name if backend.settings.backend.lower() == "milvus" else None,
             "chunks": len(store.chunks_from(snapshot))}
+
+
+@app.get("/v2/diagnostics", dependencies=[Depends(verify_token)])
+def diagnostics() -> dict:
+    evidence = backend.embedder.diagnostics()
+    current = health()
+    # Read the connected handle only; diagnostics must not reconnect or issue Milvus network calls.
+    active_index = backend._milvus
+    evidence.update({
+        "instance_id": current["instance_id"],
+        "backend": current["backend"],
+        "requested_backend": backend.settings.backend,
+        "degraded": current["degraded"],
+        "fallback_code": current["fallback_code"],
+        "milvus_collection": getattr(active_index, "collection", None),
+        "milvus_collection_generation": getattr(active_index, "collection_id", None),
+    })
+    return evidence
 
 
 @app.post("/v1/documents/index", dependencies=[Depends(verify_token)])

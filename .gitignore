@@ -27,6 +27,10 @@
 源码/beadhouse-ai/test-results/
 源码/beadhouse-ai/.milvus/
 源码/beadhouse-ai/data/*.json
+源码/beadhouse-ai/data/*.json.lock
+源码/beadhouse-ai/data/*.json.legacy.bak
+源码/beadhouse-ai/data/*.json.*.tmp
+源码/beadhouse-ai/evals/reports/
 源码/beadhouse-ai/evals/latest_report.json
 源码/beadhouse-ai/evals/latest_report.xml
 *.pyc
