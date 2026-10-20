@@ -15,6 +15,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  database:
+    name: Database / migrations + isolated restore
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Verify backup validation and recovery boundaries
+        run: python -m unittest discover -s tools -p test_database.py
+      - name: Verify real migrations, failures, lock contention and restore
+        run: python .github/database/check.py --disposable-test
+      - name: Upload database verification evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: database-verification
+          path: |
+            .runtime/database-check/**/*.json
+            .runtime/database-check/**/*.txt
+          if-no-files-found: warn
+          retention-days: 7
+
   backend:
     name: Backend / MySQL + Redis integration
     runs-on: ubuntu-24.04
@@ -77,10 +103,10 @@ jobs:
           MYSQL_PWD: scope-test-only
         run: |
           set -euo pipefail
-          for file in db_beadhouse.sql ai_care_upgrade.sql daily_task_upgrade.sql care_alert_upgrade.sql recharge_ledger_upgrade.sql attachment_access_upgrade.sql bed_lifecycle_upgrade.sql; do
-            docker exec -i -e MYSQL_PWD "$MYSQL_CONTAINER" \
-              mysql --default-character-set=utf8mb4 -uroot db_beadhouse < "数据库/$file"
-          done
+          docker exec "$MYSQL_CONTAINER" mkdir -p /opt/silvercare/database
+          docker cp 数据库/. "$MYSQL_CONTAINER:/opt/silvercare/database"
+          docker exec -e MYSQL_PWD "$MYSQL_CONTAINER" bash /opt/silvercare/database/migrate.sh initialize
+          docker exec -e MYSQL_PWD "$MYSQL_CONTAINER" bash /opt/silvercare/database/migrate.sh inspect
           docker run -d --name silvercare-ci-redis --publish 127.0.0.1:16390:6379 \
             redis:7.4.2-alpine redis-server --requirepass scope-redis-only
           for attempt in $(seq 1 30); do

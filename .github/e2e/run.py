@@ -65,11 +65,14 @@ def main():
         subprocess.run([docker, "exec", "-e", "MYSQL_PWD=scope-test-only", container,
                         "mysql", "-uroot", "-e", "DROP DATABASE IF EXISTS db_beadhouse; CREATE DATABASE db_beadhouse CHARACTER SET utf8mb4;"],
                        check=True, stdout=subprocess.DEVNULL, creationflags=creationflags)
-        for name in ("db_beadhouse.sql", "ai_care_upgrade.sql", "daily_task_upgrade.sql", "care_alert_upgrade.sql", "recharge_ledger_upgrade.sql", "attachment_access_upgrade.sql", "bed_lifecycle_upgrade.sql"):
-            subprocess.run([docker, "exec", "-i", "-e", "MYSQL_PWD=scope-test-only", container,
-                            "mysql", "--default-character-set=utf8mb4", "-uroot", "db_beadhouse"],
-                           input=(ROOT / "数据库" / name).read_bytes(), check=True, stdout=subprocess.DEVNULL,
-                           creationflags=creationflags)
+        subprocess.run([docker, "exec", container, "mkdir", "-p", "/opt/silvercare/database"],
+                       check=True, creationflags=creationflags)
+        subprocess.run([docker, "cp", str(ROOT / "数据库") + "/.", container + ":/opt/silvercare/database"],
+                       check=True, creationflags=creationflags)
+        for mode in ("initialize", "inspect"):
+            subprocess.run([docker, "exec", "-e", "MYSQL_PWD=scope-test-only", container,
+                            "bash", "/opt/silvercare/database/migrate.sh", mode],
+                           check=True, stdout=subprocess.DEVNULL, creationflags=creationflags)
         subprocess.run([docker, "run", "-d", "--name", redis_name, "-p", "127.0.0.1:16390:6379",
                         "redis:7.4.2-alpine", "redis-server", "--appendonly", "no", "--requirepass", "scope-redis-only"],
                        check=True, stdout=subprocess.DEVNULL, creationflags=creationflags)

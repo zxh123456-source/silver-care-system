@@ -67,6 +67,10 @@ foreach ($port in @(3308, 6379, 19530)) {
     }
 }
 
+# A listening port alone does not mean the required schema is installed.
+# Inspection is read-only; ordinary startup never upgrades an existing database.
+& (Join-Path $projectRoot '检查数据库.ps1')
+
 if (-not $env:DB_USERNAME) { $env:DB_USERNAME = "root" }
 
 $env:RAG_BACKEND = "milvus"

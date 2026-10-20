@@ -31,13 +31,36 @@ python -m venv .venv
 5. 仅首次导入虚构演示库时执行 `./初始化演示账号.ps1`。脚本仅转换原始演示管理员为随机 BCrypt 密码，登录凭据写入被 Git 忽略的 `.runtime/demo-accounts.txt`；重复执行不会覆盖已改过的密码。不需要旧 AES 密钥。其他旧演示员工不会被重置，仍需历史 AES 配置；也可由管理员新增演示员工并分配角色和老人。
 6. 运行 `./启动AI养老院.ps1`。脚本会启动 Docker 基础设施，再启动本机 Spring Boot、FastAPI 和 Vue，访问 `http://127.0.0.1:8080`。
 
-MySQL 容器首次创建数据卷时会依次导入演示库、AI、每日任务、告警、充值流水、附件权限和床位生命周期七份 SQL。演示库里的身份信息与联系方式均为虚构测试数据。已有数据卷不会重复初始化：先备份并停止应用写入，再执行根目录 `./升级数据库.ps1`，按顺序应用六份增量迁移。该脚本不会导入会覆盖历史数据的 `db_beadhouse.sql`。迁移可重复执行，但 MySQL DDL 不能整体回滚，失败时需依据备份和报错处理。不要通过删除已有数据卷来升级。
+MySQL 新数据卷通过统一执行器导入演示库，再应用 `数据库/migrations.tsv` 中的六份增量迁移；演示身份信息与联系方式均为虚构测试数据。已有库使用 `./升级数据库.ps1`，绝不重新导入演示 dump。首次安装、旧库升级、CI和浏览器测试共用版本清单；MySQL健康检查与本机启动脚本都检查版本完整性，普通启动不会自动升级已有库。升级操作见下节，不要删除数据卷升级。
 
 床位迁移会拒绝重复有效身份证、重复占床、床位与老人状态不一致、多个有效预订或待审退住申请，并输出冲突记录编号。应核对真实业务后修正冲突再重试，不能任意删除历史记录。预订保留有效、已退款、已转入住、已到期四种状态和原床位快照；无法核实的旧退款床位保留为空。入住可使用本人未到期预订床位，退住审核期间禁止换床；正式退住必须通过申请与审核，不能删除合同释放床位。预订退款仍仅登记退款状态，不自动修改账户余额。
 
 MySQL 容器内部端口为 `3306`，宿主机映射为 `127.0.0.1:3308`，避免与电脑上已有的 MySQL 服务冲突。Spring Boot 默认连接 3308。
 
 MinIO 的旧预构建镜像已无法拉取，Compose 现在按 [官方源码](https://github.com/minio/minio/tree/16f8cf1c52f0a77eeb8f7565aaf7f7df12454583) 构建相同的 `RELEASE.2024-12-18T13-15-44Z`，源码归档校验 SHA256，基础镜像固定 digest。首次需要联网下载 Go 依赖并编译数分钟，后续复用 Docker 构建缓存；无需本机安装 Go。构建入口为 `docker/minio/Dockerfile`，许可证随镜像保留。已有 MinIO 数据卷继续使用。
+
+## 数据库版本与备份恢复
+
+先停止应用、定时任务及其他数据库写入，保持 MySQL 运行。备份工具使用容器内凭据，不通过命令行传递密码。Windows示例（Python 3.10+，默认寻找项目虚拟环境或PATH，可用 `-PythonPath` 指定解释器）：
+
+```powershell
+$backupResult = ./备份数据库.ps1 -WritersStopped | ConvertFrom-Json
+./恢复演练.ps1 -Backup $backupResult.backup
+./升级数据库.ps1
+./检查数据库.ps1
+```
+
+默认备份位于 `.runtime/backups/` 下的新目录，不覆盖旧备份；也可指定 `-Output <新目录>`。备份与检查/升级可用 `-Container <源容器>` 指定已有 MySQL，默认选择本项目 Compose 的 mysql 服务。旧库没有版本记录时健康检查会显示未就绪，此时仍可备份和升级；如需启动已停止的旧容器，用 `docker compose up -d mysql`，待MySQL服务能连接后再备份，不用 `--wait` 等待尚未实施的迁移。
+
+`检查数据库.ps1` 只读，要求所有版本成功且与清单一致。`schema_migration` 保存版本、SHA256、状态、尝试次数和时间；校验和按UTF-8内容的LF换行计算。已成功SQL不得原地修改，后续变更新增有序迁移；未知版本、版本缺口或历史校验和漂移均拒绝升级。初始化拒绝非空数据库，来源记录区分新演示库和旧库接管。
+
+迁移失败保留 `FAILED`；进程异常中断后，下次升级会把残留 `RUNNING` 记录为 `INTERRUPTED` 并停止。根据诊断修复实际原因后，使用 `./升级数据库.ps1 -RetryFailed` 显式重试同一校验和且允许重试的版本。DDL不能整体回滚，不提供强制标成功或自动跳过。版本冲突也允许先取备份，备份会标记 `NOT_READY`；恢复到相同状态不等于版本已可用于启动应用。
+
+备份包含表结构、数据、约束、存储过程、触发器及事件，并附字节数和SHA256清单；不包括上传文件目录、Redis或Milvus。需另行保存附件磁盘，并按 `filesave` 配置核对恢复路径。备份执行前后核对表摘要和结构，迁移与备份通过同一MySQL会话锁互斥；`-WritersStopped` 表示已停止不参与该锁的业务写入。
+
+恢复演练先校验文件，再创建无宿主端口、无宿主数据卷挂载的独立 MySQL 8.0.40 容器，关闭事件调度，逐表比较行数和校验值、迁移记录、约束及存储对象。它不接受日常库作为恢复目标，不改动来源库。成功后清理自建容器；失败日志在 `.runtime/database-drills/`，需要保留故障容器时显式使用 `-KeepOnFailure`。这是恢复验证工具，正式切换数据库由维护者依据已验证备份和部署配置执行。
+
+可执行验收：`python -m unittest discover -s tools -p test_database.py`，以及 `python .github/database/check.py --disposable-test`；后者只创建并操作自有隔离容器，覆盖新旧库、重复、漂移、争锁、故障/中断、备份恢复与篡改拒绝。
 
 ## 安全约定
 
@@ -61,7 +84,7 @@ Milvus 已启用认证，MinIO 用户和密码同时传给 MinIO 与 Milvus 存�
 
 上传与读取统一经过前端 `/api` 代理，前端使用认证请求获取Blob预览，保存表单仍传资源URL；令牌不会发往外域。`FILE_UPLOAD_HEAD` 等旧配置不再生成新的公共文件链接。Excel导出通过认证接口直接返回XLSX字节，保留老人范围，不写公开下载目录。
 
-已有库先运行 `数据库/attachment_access_upgrade.sql`。迁移只按数据库内URL精确匹配回填引用，不改旧业务URL、不猜测文件名。唯一归属标记BOUND，多属主或同URL多元数据标记CONFLICT，未匹配附件保留LEGACY，均不会伪装成新草稿。SQL输出回填/冲突/未匹配报告；管理员可调用 `GET /file/diagnostics?afterId=0&limit=100` 分页检查磁盘状态，响应不暴露路径或旧URL。关联回填不代表磁盘文件存在；旧文件缺失或在配置目录之外时，应核对备份并重新上传。前端对不可预览的历史图片显示占位并保留原字段，允许修改其他资料；未知URL不能绑定到新业务。
+已有库先运行 `./升级数据库.ps1`，其中包含附件权限迁移。迁移只按数据库内URL精确匹配回填引用，不改旧业务URL、不猜测文件名。唯一归属标记BOUND，多属主或同URL多元数据标记CONFLICT，未匹配附件保留LEGACY，均不会伪装成新草稿。SQL输出回填/冲突/未匹配报告；管理员可调用 `GET /file/diagnostics?afterId=0&limit=100` 分页检查磁盘状态，响应不暴露路径或旧URL。关联回填不代表磁盘文件存在；旧文件缺失或在配置目录之外时，应核对备份并重新上传。前端对不可预览的历史图片显示占位并保留原字段，允许修改其他资料；未知URL不能绑定到新业务。
 
 认证失败返回 HTTP/业务码401，权限不足返回403；会话存储或员工状态查询不可用返回503。前端仅对失效私有会话清理登录状态，403保留登录；并发401只触发一次退出，较早请求的失败不会注销后来新建的会话。其他旧业务码保留既有传输约定。SQL参数默认不输出到日志；仅本地排障时可显式设置 `MYBATIS_LOG_IMPL=org.apache.ibatis.logging.stdout.StdOutImpl`。
 
@@ -90,10 +113,11 @@ RAG 文档缓存已增加磁盘失败保护、损坏文件校验和单进程并�
 
 人工流程为待确认 → 已确认 → 已解除，解除需要1至500字依据，仅确认人或超级管理员可解除。版本冲突返回409；所有查询和操作沿用老人数据范围。服务对原记录与告警实行事务提交；告警写入失败时，原测量/登记也回滚，避免丢失提醒。
 
-已有环境需先执行 `数据库/care_alert_upgrade.sql`（并确保每日任务迁移已执行）。新 Docker 数据卷会自动执行全部初始化脚本。PowerShell：
+已有环境通过统一升级脚本应用告警及其前置迁移。新 Docker 数据卷会自动执行版本清单。PowerShell：
 
 ```powershell
-Get-Content -Raw -Encoding UTF8 数据库/care_alert_upgrade.sql | docker compose exec -T mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" db_beadhouse'
+./升级数据库.ps1
+./检查数据库.ps1
 ```
 
 接口：`GET /ai/daily/alerts?state=ACTIVE`、`POST /ai/daily/alerts/scan?date=yyyy-MM-dd`、`POST /ai/daily/alerts/ack`、`POST /ai/daily/alerts/resolve`。确认/解除提交 `id`、`revision`，解除附 `note`。返回 `sourceId`、`alertKey` 与 `taskKey` 供追踪原记录及关联任务。
@@ -112,10 +136,11 @@ Get-Content -Raw -Encoding UTF8 数据库/care_alert_upgrade.sql | docker compos
 
 协作截止时间默认来源时间加24小时，逾期依据当前时间计算；完成后解除逾期展示。该截止时间不是医嘱服药时间。任务列表默认显示未完成，最多200条，保留历史任务便于追踪。此版本支持逾期展示与人工闭环，尚无短信/邮件升级提醒。
 
-已有数据库需执行 `数据库/daily_task_upgrade.sql`；新建 Docker MySQL 数据卷会自动执行。PowerShell 可在项目根目录执行：
+已有数据库通过统一升级脚本安装每日任务及其前置版本；新建 Docker MySQL 数据卷会自动执行。PowerShell 可在项目根目录执行：
 
 ```powershell
-Get-Content -Raw -Encoding UTF8 数据库/daily_task_upgrade.sql | docker compose exec -T mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" db_beadhouse'
+./升级数据库.ps1
+./检查数据库.ps1
 ```
 
 接口：`GET /ai/daily/tasks?state=ACTIVE&date=yyyy-MM-dd`、`POST /ai/daily/tasks/sync?date=yyyy-MM-dd`、`GET /ai/daily/tasks/owners?id=任务编号`、`POST /ai/daily/tasks/claim|transfer|complete`。操作提交 `id` 和 `revision`，转交附 `targetStaffId`，完成附 `note`。日常启动不会自动修改已有数据库结构。
