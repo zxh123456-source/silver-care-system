@@ -1,5 +1,7 @@
 import { http } from "@/utils";
 import { IPageSearchElderByKey } from "@/apis/bookManage";
+import { resourceSessionConfig } from "@/utils/authResource";
+import type { ResourceSession } from "@/utils/authResource";
 
 interface IPageCheckContractByKey {
   name: string;
@@ -103,8 +105,8 @@ export async function listReserveStaff() {
 }
 
 // 新增入住签约
-export function addCheckContract(data: IAddCheckContract) {
-  return http.post("/api/checkContract/addCheckContract", data);
+export function addCheckContract(data: IAddCheckContract, session: ResourceSession) {
+  return http.post("/api/checkContract/addCheckContract", data, resourceSessionConfig(session));
 }
 
 // 根据老人编号查询入住签约
@@ -117,8 +119,8 @@ export async function getCheckContractById(data: IGetCheckContractById) {
 }
 
 // 编辑入住签约
-export function editCheckContract(data: IAddCheckContract) {
-  return http.put("/api/checkContract/editCheckContract", data);
+export function editCheckContract(data: IAddCheckContract, session: ResourceSession) {
+  return http.put("/api/checkContract/editCheckContract", data, resourceSessionConfig(session));
 }
 
 // 删除入住签约

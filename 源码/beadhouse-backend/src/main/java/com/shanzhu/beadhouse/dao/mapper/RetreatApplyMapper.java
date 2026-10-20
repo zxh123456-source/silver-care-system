@@ -6,6 +6,7 @@ import com.shanzhu.beadhouse.entity.query.PageRetreatApplyQuery;
 import com.shanzhu.beadhouse.entity.query.PageRetreatAuditQuery;
 import com.shanzhu.beadhouse.entity.vo.PageRetreatByKeyVo;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 
 import java.util.List;
 
@@ -18,6 +19,11 @@ import java.util.List;
  * @date: 2024-08-10
  */
 public interface RetreatApplyMapper extends BaseMapper<RetreatApply> {
+    @Select("SELECT * FROM retreat_apply WHERE id=#{id} FOR UPDATE")
+    RetreatApply selectByIdForUpdate(@Param("id") Long id);
+
+    @Select("SELECT * FROM retreat_apply WHERE pending_elder_id=#{elderId} FOR UPDATE")
+    RetreatApply selectPendingForUpdate(@Param("elderId") Long elderId);
     /**
      * 根据搜索关键字查询退住申请信息
      *

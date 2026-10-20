@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.dao.DuplicateKeyException;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
@@ -32,6 +33,10 @@ public class BusinessRuntimeExceptionAdvice {
             // AssertUtils断言抛出的自定义业务异常
             errorCode = ((BusinessRuntimeException) ex).getCode();
             errorMsg = ((BusinessRuntimeException) ex).getMsg();
+        } else if (ex instanceof DuplicateKeyException) {
+            errorType = "业务冲突";
+            errorCode = 409;
+            errorMsg = "记录已存在或状态发生冲突，请刷新后重试";
         } else if (ex instanceof NoHandlerFoundException) {
             errorType = "无访问资源";
             errorCode = ExceptionEnum.NOT_EXIST.getCode();

@@ -3,6 +3,9 @@
     <el-dialog
       v-model="dialogVisible"
       :title="drawerProps.title"
+      :close-on-click-modal="!submitting"
+      :close-on-press-escape="!submitting"
+      :show-close="!submitting"
       destroy-on-close
     >
       <div>
@@ -11,6 +14,7 @@
           class="login-form"
           ref="ruleFormRef"
           :rules="rules"
+          :disabled="drawerProps.isView || submitting"
           label-width="120px"
         >
           <div class="flex justify-around flex-wrap">
@@ -21,7 +25,7 @@
                     <el-button
                       @click="openDrawer('elder')"
                       :icon="Plus"
-                      :style="{cursor: (drawerProps.title !== '新增' ? not-allowed : cursor)}"
+                      :style="{ cursor: drawerProps.title !== '新增' ? 'not-allowed' : 'pointer' }"
                       :disabled="drawerProps.title !== '新增'"
                     />
                   </template>
@@ -64,6 +68,8 @@
               <el-form-item label="预定床位:" prop="bedId">
                 <el-input
                   v-model="formData.bedName"
+                  readonly
+                  @clear="formData.bedId = ''"
                   @click="openDrawer('tree')"
                   clearable
                   placeholder="请选择"
@@ -129,20 +135,22 @@
       </div>
       <template v-if="!drawerProps.isView" #footer>
         <span class="dialog-footer">
-          <el-button @click="dialogVisible = false">取消</el-button>
-          <el-button class="bg-blue" type="primary" @click="handleSubmit">
+          <el-button @click="dialogVisible = false" :disabled="submitting">取消</el-button>
+          <el-button class="bg-blue" type="primary" :loading="submitting" @click="handleSubmit">
             提交
           </el-button>
         </span>
       </template>
     </el-dialog>
-    <elderListDialog @getCheckElderInfo="getCheckElderInfo" ref="ElderDialogRef" />
-    <treeDialog @getCheckBedInfo="getCheckBedInfo" ref="TreeDialogRef" />
+    <elderListDialog v-if="dialogVisible" @getCheckElderInfo="getCheckElderInfo" ref="ElderDialogRef" />
+    <treeDialog v-if="dialogVisible" @getCheckBedInfo="getCheckBedInfo" ref="TreeDialogRef" />
   </div>
 </template>
 
 <script lang="ts" setup>
-import { onMounted, reactive, ref } from "vue";
+import { onBeforeUnmount, reactive, ref, watch } from "vue";
+import { captureResourceSession, isResourceSessionCurrent } from "@/utils/authResource";
+import type { ResourceSession } from "@/utils/authResource";
 import elderListDialog from "@/components/elderListDialog/index.vue";
 import treeDialog from "@/components/treeDialog/index.vue";
 import { ElMessage, ElMessageBox, FormInstance, FormRules } from "element-plus";
@@ -165,6 +173,15 @@ import {
 
 const ruleFormRef = ref<FormInstance | null>(null);
 const dialogVisible = ref(false);
+const submitting = ref(false);
+let dialogEpoch = 0;
+let dialogSession: ResourceSession | undefined;
+watch(dialogVisible, visible => { if (!visible) { dialogEpoch++; submitting.value = false; } }, { flush: "sync" });
+const sessionChanged = () => { if (dialogSession && !isResourceSessionCurrent(dialogSession)) dialogVisible.value = false; };
+window.addEventListener("storage", sessionChanged);
+onBeforeUnmount(() => { dialogEpoch++; window.removeEventListener("storage", sessionChanged); });
+const canEdit = () => dialogVisible.value && !drawerProps.value.isView && !submitting.value
+  && !!dialogSession && isResourceSessionCurrent(dialogSession);
 const ReserveStaffList = ref<{ id: number; name: string | number }[]>([]);
 const Reserve = ref<{ id: number; name: string | number }[]>([]);
 
@@ -251,7 +268,7 @@ interface DialogProps {
   title: string;
   isView: boolean;
   rowData?: any;
-  api?: (params: any) => Promise<any>;
+  api?: (params: any, session: ResourceSession) => Promise<any>;
   getTableList?: () => Promise<any>;
 }
 
@@ -279,6 +296,7 @@ const formData = ref({
 const ElderDialogRef = ref();
 const TreeDialogRef = ref();
 const openDrawer = (type: string) => {
+  if (!canEdit()) return;
   if (type === "elder") {
     const params = {
       elderApi: pageSearchElderByKey
@@ -294,6 +312,7 @@ const openDrawer = (type: string) => {
 
 // 获取选择老人的信息
 const getCheckElderInfo = (row: any) => {
+  if (!canEdit()) return;
   formData.value.elderName = row.name;
   formData.value.idNum = row.idNum;
   formData.value.elderAge = row.age;
@@ -304,48 +323,55 @@ const getCheckElderInfo = (row: any) => {
 
 // 获取选择床位的信息
 const getCheckBedInfo = (bed: any) => {
+  if (!canEdit()) return;
   formData.value.bedId = bed.id;
   formData.value.bedName = bed.name;
 };
 
 // 接收父组件传过来的参数
 const acceptParams = async (params: DialogProps) => {
-  const [ReserveStaffListData, ReserveData] =
-    await Promise.all([
+  const epoch = ++dialogEpoch;
+  try {
+    const session = captureResourceSession();
+    dialogSession = session;
+    const [staff, detail] = await Promise.all([
       listReserveStaff(),
-      getReserveById({
-        reserveId: params.rowData.reserveId,
-        elderId: params.rowData.elderId
+      params.title === "新增" ? Promise.resolve({ code: 200, data: {} }) : getReserveById({
+        reserveId: params.rowData.reserveId, elderId: params.rowData.elderId
       })
     ]);
-  ReserveStaffList.value = ReserveStaffListData.data;
-  Reserve.value = ReserveData.data;
-  drawerProps.value = params;
-  formData.value = { ...params.rowData, ...ReserveData.data };
-  dialogVisible.value = true;
+    if (epoch !== dialogEpoch || !isResourceSessionCurrent(session)) return;
+    if (staff.code !== 200 || detail.code !== 200) {
+      ElMessage.error("预订资料读取失败，请重试");
+      return;
+    }
+    ReserveStaffList.value = staff.data;
+    Reserve.value = detail.data;
+    drawerProps.value = params;
+    formData.value = { bedId: "", bedName: "", deposit: "", dueDate: "", elderAddress: "", elderAge: "",
+      elderName: "", elderPhone: "", elderSex: "", idNum: "", payerName: "", payerPhone: "", staffId: "",
+      ...params.rowData, ...detail.data };
+    submitting.value = false;
+    dialogVisible.value = true;
+  } catch { if (epoch === dialogEpoch) ElMessage.error("预订资料读取失败，请重试"); }
 };
 
-//点击提交
-const handleSubmit = () => {
-  ruleFormRef.value!.validate(async valid => {
-    if (!valid) return;
-    try {
-      const res = await drawerProps.value.api!(formData.value);
-      if (res.code == 200) {
-        ElMessage.success({
-          message: res.msg
-        });
-        drawerProps.value.getTableList!();
-        dialogVisible.value = false;
-      } else {
-        ElMessage.error({
-          message: res.msg
-        });
-      }
-    } catch (error) {
-      console.log(error);
-    }
-  });
+const handleSubmit = async () => {
+  if (!canEdit() || !dialogSession) return;
+  const epoch = dialogEpoch, session = dialogSession;
+  submitting.value = true;
+  try {
+    const valid = await ruleFormRef.value!.validate().catch(() => false);
+    if (!valid || epoch !== dialogEpoch || !isResourceSessionCurrent(session)) return;
+    const res = await drawerProps.value.api!(formData.value, session);
+    if (epoch !== dialogEpoch || !isResourceSessionCurrent(session)) return;
+    if (res.code === 200) {
+      ElMessage.success(res.msg);
+      drawerProps.value.getTableList!();
+      dialogVisible.value = false;
+    } else ElMessage.error(res.msg);
+  } catch { /* Keep form values for a retry after transport or business rejection. */ }
+  finally { if (epoch === dialogEpoch) submitting.value = false; }
 };
 
 defineExpose({

@@ -4,6 +4,7 @@ import com.shanzhu.beadhouse.entity.po.Bed;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.shanzhu.beadhouse.entity.vo.GetBedByIdVo;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 
 /**
  * <p>
@@ -14,6 +15,9 @@ import org.apache.ibatis.annotations.Param;
  * @date: 2024-08-10
  */
 public interface BedMapper extends BaseMapper<Bed> {
+    @Select("SELECT * FROM bed WHERE id=#{id} FOR UPDATE")
+    Bed selectByIdForUpdate(@Param("id") Long id);
+
     /**
      * 根据编号获取床位信息
      *

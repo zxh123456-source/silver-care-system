@@ -210,22 +210,32 @@ class AdmissionScopeHttpIntegrationTest {
     }
 
     @Test void historicalSalesAndRefundedReservationsDoNotBypassAssignments() {
+        seedStructure();
+        seedBed(FIRST, "空闲");
+        seedBed(SECOND, "预定");
         seedElder(FIRST, "as-h-old", "咨询中", OWN, null);
-        seedElder(SECOND, "as-h-book", "预定", OTHER, null);
+        seedElder(SECOND, "as-h-book", "预定", OTHER, SECOND);
         seedConsult(FIRST, FIRST, OWN, OWN);
-        seedReserve(FIRST, FIRST, OWN, OWN);
+        seedReserve(FIRST, FIRST, OWN, OWN, FIRST, "CONVERTED");
         seedReserve(SECOND, SECOND, OWN, OTHER);
         assign(FIRST, EMPTY);
         assign(SECOND, EMPTY);
         ok(HttpMethod.GET, consultDetail(FIRST, FIRST), staffToken, null);
         ok(HttpMethod.GET, reserveDetail(SECOND, SECOND), staffToken, null);
-        jdbc.update("UPDATE reserve SET reserve_flag='Y' WHERE id=?", SECOND);
+        jdbc.update("UPDATE reserve SET reserve_flag='Y',state='REFUNDED' WHERE id=?", SECOND);
+        jdbc.update("UPDATE elder SET check_flag='意向跟进',bed_id=NULL WHERE id=?", SECOND);
+        jdbc.update("UPDATE bed SET bed_flag='空闲' WHERE id=?", SECOND);
         denied(HttpMethod.GET, reserveDetail(SECOND, SECOND), staffToken, null);
         ok(HttpMethod.GET, reserveDetail(SECOND, SECOND), emptyToken, null);
 
         // These stages must not inherit access from a creator or an old sales relationship.
         for (String state : Arrays.asList("入住", "退住审核", "已退住", "已失效")) {
-            jdbc.update("UPDATE elder SET check_flag=? WHERE id=?", state, FIRST);
+            boolean occupied = "入住".equals(state) || "退住审核".equals(state);
+            jdbc.update("UPDATE elder SET check_flag=?,bed_id=? WHERE id=?", state, occupied ? FIRST : null, FIRST);
+            jdbc.update("UPDATE bed SET bed_flag=? WHERE id=?", occupied ? state : "空闲", FIRST);
+            jdbc.update("DELETE FROM retreat_apply WHERE elder_id=?", FIRST);
+            if ("退住审核".equals(state))
+                jdbc.update("INSERT INTO retreat_apply(elder_id,apply_flag,create_id,create_time,update_id,update_time) VALUES(?,'待审核',?,NOW(),?,NOW())", FIRST, OWN, OWN);
             denied(HttpMethod.GET, consultDetail(FIRST, FIRST), staffToken, null);
             denied(HttpMethod.GET, reserveDetail(FIRST, FIRST), staffToken, null);
             ok(HttpMethod.GET, consultDetail(FIRST, FIRST), emptyToken, null);
@@ -378,6 +388,8 @@ class AdmissionScopeHttpIntegrationTest {
     }
 
     @Test void intentionChildrenUseStoredOwnershipAndFollowStageAndAssignmentChanges() {
+        seedStructure();
+        seedBed(FIRST, "空闲");
         seedElder(FIRST, "as-i-own", "意向跟进", OWN, null);
         seedElder(FOREIGN, "as-i-away", "意向跟进", OTHER, null);
         for (long elder : Arrays.asList(FIRST, FOREIGN)) {
@@ -430,7 +442,8 @@ class AdmissionScopeHttpIntegrationTest {
         ok(HttpMethod.POST, "/intention/addCommunicationRecord", staffToken,
                 map("elderId", FIRST, "recordDate", today, "communicationRecord", "as-new"));
 
-        jdbc.update("UPDATE elder SET check_flag='入住' WHERE id=?", FIRST);
+        jdbc.update("UPDATE elder SET check_flag='入住',bed_id=? WHERE id=?", FIRST, FIRST);
+        jdbc.update("UPDATE bed SET bed_flag='入住' WHERE id=?", FIRST);
         before = fingerprint();
         denied(HttpMethod.GET, "/intention/getElderLabelById?elderId=" + FIRST, staffToken, null);
         denied(HttpMethod.DELETE, "/intention/deleteVisitPlan?visitPlanId=" + FIRST, staffToken, null);
@@ -467,10 +480,17 @@ class AdmissionScopeHttpIntegrationTest {
     }
 
     private void seedReserve(long id, long elder, long handler, long creator) {
-        jdbc.update("INSERT INTO reserve(id,elder_id,staff_id,name,phone,due_date,deposit,reserve_flag,"
+        Long bed = jdbc.queryForObject("SELECT bed_id FROM elder WHERE id=?", Long.class, elder);
+        String elderState = jdbc.queryForObject("SELECT check_flag FROM elder WHERE id=?", String.class, elder);
+        assertThat(bed).as("reservation fixture has a real immutable bed snapshot").isNotNull();
+        seedReserve(id, elder, handler, creator, bed, "预定".equals(elderState) ? "ACTIVE" : "CONVERTED");
+    }
+
+    private void seedReserve(long id, long elder, long handler, long creator, long bed, String state) {
+        jdbc.update("INSERT INTO reserve(id,elder_id,staff_id,bed_id,state,name,phone,due_date,deposit,reserve_flag,"
                         + "create_id,create_time,update_id,update_time) "
-                        + "VALUES(?,?,?,'as-payer','19900002001',DATE_ADD(NOW(),INTERVAL 30 DAY),10,'N',?,NOW(),?,NOW())",
-                id, elder, handler, creator, creator);
+                        + "VALUES(?,?,?,?,?,'as-payer','19900002001',DATE_ADD(NOW(),INTERVAL 30 DAY),10,'N',?,NOW(),?,NOW())",
+                id, elder, handler, bed, state, creator, creator);
     }
 
     private void seedVisit(long id, long elder, long creator) {

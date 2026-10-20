@@ -4,6 +4,7 @@ import cn.hutool.core.bean.BeanUtil;
 import com.shanzhu.beadhouse.common.constant.CheckEnum;
 import com.shanzhu.beadhouse.common.config.exception.BusinessRuntimeException;
 import com.shanzhu.beadhouse.service.common.AiDataScopeService;
+import com.shanzhu.beadhouse.service.common.BedLifecycleSupport;
 import java.util.Objects;
 import com.shanzhu.beadhouse.common.constant.ExceptionEnum;
 import com.shanzhu.beadhouse.common.util.AssertUtil;
@@ -28,6 +29,7 @@ import com.shanzhu.beadhouse.service.common.SourceFunc;
 import com.shanzhu.beadhouse.service.common.StaffFunc;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Isolation;
 
 import javax.annotation.Resource;
 import java.util.Date;
@@ -35,6 +37,7 @@ import java.util.List;
 
 @Service
 public class ConsultServiceImpl implements ConsultService {
+    @Resource private BedLifecycleSupport bedLifecycle;
     @Resource private AiDataScopeService dataScopeService;
     @Resource
     private ConsultMapper consultMapper;
@@ -101,9 +104,12 @@ public class ConsultServiceImpl implements ConsultService {
     }
 
     @Override
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result editConsult(OperateConsultQuery query) {
         requireConsultAccess(query.getConsultId(), query.getElderId());
+        Elder stored = bedLifecycle.lockElder(query.getElderId());
+        requireConsultAccess(query.getConsultId(), stored.getId());
+        bedLifecycle.assertState(stored, CheckEnum.CONSULT.getStatus());
         // 验证老人
         elderFunc.checkElder(query.getElderId(), query.getIdNum());
         // 初始化老人
@@ -120,10 +126,12 @@ public class ConsultServiceImpl implements ConsultService {
     }
 
     @Override
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result deleteConsult(Long elderId) {
         dataScopeService.assertElderAccess(elderId);
-        // 验证老人
-        Elder elder = elderFunc.checkElder(elderId, null);
+        Elder elder = bedLifecycle.lockElder(elderId);
+        dataScopeService.assertElderAccess(elderId);
+        bedLifecycle.assertState(elder, CheckEnum.CONSULT.getStatus());
         // 封装修改
         elder.setCheckFlag(CheckEnum.FAILURE.getStatus());
         // 修改
@@ -132,10 +140,12 @@ public class ConsultServiceImpl implements ConsultService {
     }
 
     @Override
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result intentionConsult(Long elderId) {
         dataScopeService.assertElderAccess(elderId);
-        // 验证老人
-        Elder elder = elderFunc.checkElder(elderId, null);
+        Elder elder = bedLifecycle.lockElder(elderId);
+        dataScopeService.assertElderAccess(elderId);
+        bedLifecycle.assertState(elder, CheckEnum.CONSULT.getStatus());
         // 封装修改
         elder.setCheckFlag(CheckEnum.INTENTION.getStatus());
         // 修改

@@ -9,7 +9,7 @@
                 OR (e.check_flag IN ('咨询中','意向跟进','预定') AND (
                     e.create_id = #{scopeStaffId}
                     OR EXISTS (SELECT 1 FROM consult ec WHERE ec.elder_id=e.id AND ec.staff_id=#{scopeStaffId})
-                    OR EXISTS (SELECT 1 FROM reserve er WHERE er.elder_id=e.id AND er.staff_id=#{scopeStaffId} AND er.reserve_flag='N')
+                    OR EXISTS (SELECT 1 FROM reserve er WHERE er.elder_id=e.id AND er.staff_id=#{scopeStaffId} AND er.reserve_flag='N' AND er.state='ACTIVE')
                 )))
         </if>
     </sql>

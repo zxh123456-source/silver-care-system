@@ -4,6 +4,9 @@
       style="width: 70%"
       v-model="dialogVisible"
       :title="drawerProps.title"
+      :close-on-click-modal="!submitting"
+      :close-on-press-escape="!submitting"
+      :show-close="!submitting"
       destroy-on-close
     >
       <div>
@@ -12,6 +15,7 @@
           class="login-form"
           ref="ruleFormRef"
           :rules="rules"
+          :disabled="drawerProps.isView || submitting"
           label-width="120px"
         >
           <div class="flex justify-around flex-wrap">
@@ -22,7 +26,7 @@
                     <el-button
                       @click="openDrawer('elder')"
                       :icon="Plus"
-                      :style="{cursor: (drawerProps.title !== '新增' ? not-allowed : cursor)}"
+                      :style="{ cursor: drawerProps.title !== '新增' ? 'not-allowed' : 'pointer' }"
                       :disabled="drawerProps.title !== '新增'"
                     />
                   </template>
@@ -65,6 +69,8 @@
               <el-form-item label="入住床位:" prop="bedId">
                 <el-input
                   v-model="formData.bedName"
+                  readonly
+                  @clear="clearBed"
                   @click="openDrawer('tree')"
                   clearable
                   placeholder="请选择"
@@ -158,7 +164,7 @@
             <div style="width: 100%">
               <el-form-item label="紧急联系人:" prop="operateEmergencyContactQueryList">
                 <div>
-                  <el-form>
+                  <el-form :disabled="drawerProps.isView || submitting">
                     <div style="position: relative;">
                       <el-button
                         class="bg-blue"
@@ -217,10 +223,11 @@
       </div>
       <template v-if="!drawerProps.isView" #footer>
       <span class="dialog-footer">
-        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button @click="dialogVisible = false" :disabled="submitting">取消</el-button>
         <el-button
           class="bg-blue"
           type="primary"
+          :loading="submitting"
           @click="handleSubmit"
         >
           提交
@@ -228,13 +235,15 @@
       </span>
       </template>
     </el-dialog>
-    <elderListDialog @getCheckElderInfo="getCheckElderInfo" ref="ElderDialogRef" />
-    <treeDialog @getCheckBedInfo="getCheckBedInfo" ref="TreeDialogRef" />
+    <elderListDialog v-if="dialogVisible" @getCheckElderInfo="getCheckElderInfo" ref="ElderDialogRef" />
+    <treeDialog v-if="dialogVisible" @getCheckBedInfo="getCheckBedInfo" ref="TreeDialogRef" />
   </div>
 </template>
 
 <script lang="ts" setup>
-import { onMounted, reactive, ref, toRefs } from "vue";
+import { onBeforeUnmount, reactive, ref, watch } from "vue";
+import { captureResourceSession, isResourceSessionCurrent } from "@/utils/authResource";
+import type { ResourceSession } from "@/utils/authResource";
 import elderListDialog from "@/components/elderListDialog/index.vue";
 import treeDialog from "@/components/treeDialog/index.vue";
 import { ElMessage, ElMessageBox, FormInstance, FormRules } from "element-plus";
@@ -257,6 +266,14 @@ import {
 
 const ruleFormRef = ref<FormInstance | null>(null);
 const dialogVisible = ref(false);
+const submitting = ref(false);
+let dialogEpoch = 0;
+let selectionEpoch = 0;
+let dialogSession: ResourceSession | undefined;
+watch(dialogVisible, visible => { if (!visible) { dialogEpoch++; selectionEpoch++; submitting.value = false; } }, { flush: "sync" });
+const sessionChanged = () => { if (dialogSession && !isResourceSessionCurrent(dialogSession)) dialogVisible.value = false; };
+window.addEventListener("storage", sessionChanged);
+onBeforeUnmount(() => { dialogEpoch++; selectionEpoch++; window.removeEventListener("storage", sessionChanged); });
 const NursingGradeList = ref<{ id: number; name: string | number }[]>([]);
 const CateringSetList = ref<{ id: number; name: string | number }[]>([]);
 const EnterStaffList = ref<{ id: number; name: string | number }[]>([]);
@@ -376,7 +393,7 @@ interface DialogProps {
   title: string;
   isView: boolean;
   rowData?: any;
-  api?: (params: any) => Promise<any>;
+  api?: (params: any, session: ResourceSession) => Promise<any>;
   getTableList?: () => Promise<any>;
 }
 
@@ -407,7 +424,11 @@ const formData = ref({
 // 打开选择老人的列表 drawer
 const ElderDialogRef = ref();
 const TreeDialogRef = ref();
+const canEdit = () => dialogVisible.value && !drawerProps.value.isView && !submitting.value
+  && !!dialogSession && isResourceSessionCurrent(dialogSession);
+const clearBed = () => { selectionEpoch++; formData.value.bedId = ""; formData.value.bedName = ""; };
 const openDrawer = (type: string) => {
+  if (!canEdit()) return;
   if (type === "elder") {
     const params = {
       elderApi: pageSearchElderByKey
@@ -422,52 +443,96 @@ const openDrawer = (type: string) => {
 };
 
 // 获取选择老人的信息
-const getCheckElderInfo = (row: any) => {
+const getCheckElderInfo = async (row: any) => {
+  if (!canEdit() || !dialogSession) return;
+  const session = dialogSession;
+  const version = ++selectionEpoch;
+  const epoch = dialogEpoch;
+  formData.value.id = row.id;
   formData.value.name = row.name;
   formData.value.idNum = row.idNum;
   formData.value.age = row.age;
   formData.value.sex = row.sex;
   formData.value.phone = row.phone;
   formData.value.address = row.address;
+  formData.value.bedId = "";
+  formData.value.bedName = "";
+  try {
+    const response: any = await getCheckContractById({ elderId: row.id });
+    if (response.code !== 200 || !response.data?.bedId || epoch !== dialogEpoch || version !== selectionEpoch
+      || !isResourceSessionCurrent(session)) return;
+    const bed: any = await getBedById(response.data.bedId);
+    if (bed.code !== 200 || !bed.data || epoch !== dialogEpoch || version !== selectionEpoch
+      || !isResourceSessionCurrent(session)) return;
+    formData.value.bedId = response.data.bedId;
+    formData.value.bedName = bed.data.bedName;
+  } catch { /* Preserve the selected identity; a fresh bed can still be selected explicitly. */ }
 };
 
 // 获取选择床位的信息
 const getCheckBedInfo = (bed: any) => {
+  if (!canEdit()) return;
+  selectionEpoch++;
   formData.value.bedId = bed.id;
   formData.value.bedName = bed.name;
 };
 
 // 接收父组件传过来的参数
 const acceptParams = async (params: DialogProps) => {
+  const epoch = ++dialogEpoch;
+  selectionEpoch++;
+  try {
+  const session = captureResourceSession();
+  dialogSession = session;
   const [NursingGradeListData, CateringSetListData, EnterStaffListData, echoData] =
     await Promise.all([
       listNurseGrade(),
       listCateringSet(),
       listReserveStaff(),
-      getCheckContractById({
+      params.title === "新增" ? Promise.resolve({ code: 200, data: {} }) : getCheckContractById({
         elderId: params.rowData.id
       })
     ]);
+  if (epoch !== dialogEpoch || !isResourceSessionCurrent(session)) return;
+  if ([NursingGradeListData, CateringSetListData, EnterStaffListData, echoData].some((result: any) => result.code !== 200)) {
+    ElMessage.error("入住资料读取失败，请重试");
+    return;
+  }
   NursingGradeList.value = NursingGradeListData.data;
   CateringSetList.value = CateringSetListData.data;
   EnterStaffList.value = EnterStaffListData.data;
   drawerProps.value = params;
-  formData.value = { ...params.rowData, ...echoData.data };
+  formData.value = { id: "", nursingGradeId: "", cateringSetId: "", bedId: "", bedName: "", name: "", idNum: "",
+    age: "", sex: "", phone: "", address: "", staffId: "", signDate: "", startDate: "", endDate: "",
+    contractPeriod: [], operateEmergencyContactQueryList: [], ...params.rowData, ...echoData.data };
   formData.value.contractPeriod = [formData.value.startDate, formData.value.endDate];
   if (drawerProps.value.title !== "新增") {
     const res: any = await getBedById(formData.value.bedId);
+    if (epoch !== dialogEpoch || !isResourceSessionCurrent(session)) return;
+    if (res.code !== 200 || !res.data) { ElMessage.error("床位资料读取失败，请重试"); return; }
     formData.value.bedName = res.data.bedName;
   }
-  contactList.value = formData.value.operateEmergencyContactQueryList;
+  if (epoch !== dialogEpoch || !isResourceSessionCurrent(session)) return;
+  contactList.value = formData.value.operateEmergencyContactQueryList || [];
+  formData.value.operateEmergencyContactQueryList = contactList.value;
+  submitting.value = false;
   dialogVisible.value = true;
+  } catch {
+    if (epoch === dialogEpoch) ElMessage.error("入住资料读取失败，请重试");
+  }
 };
 
 //点击提交
-const handleSubmit = () => {
-  ruleFormRef.value!.validate(async valid => {
-    if (!valid) return;
-    try {
-      const res = await drawerProps.value.api!(formData.value);
+const handleSubmit = async () => {
+  if (!canEdit() || !dialogSession) return;
+  const epoch = dialogEpoch;
+  const session = dialogSession;
+  submitting.value = true;
+  try {
+      const valid = await ruleFormRef.value!.validate().catch(() => false);
+      if (!valid || epoch !== dialogEpoch || !isResourceSessionCurrent(session)) return;
+      const res = await drawerProps.value.api!(formData.value, session);
+      if (epoch !== dialogEpoch || !isResourceSessionCurrent(session)) return;
       if (res.code == 200) {
         ElMessage.success({
           message: res.msg
@@ -479,10 +544,8 @@ const handleSubmit = () => {
           message: res.msg
         });
       }
-    } catch (error) {
-      console.log(error);
-    }
-  });
+  } catch { /* Keep form values after a transport or business failure. */ }
+  finally { if (epoch === dialogEpoch) submitting.value = false; }
 };
 
 defineExpose({

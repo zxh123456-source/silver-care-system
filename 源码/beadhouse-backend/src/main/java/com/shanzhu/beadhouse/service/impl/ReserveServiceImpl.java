@@ -27,6 +27,10 @@ import com.shanzhu.beadhouse.service.ReserveService;
 import com.shanzhu.beadhouse.service.common.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import javax.annotation.Resource;
 import java.util.*;
@@ -34,6 +38,8 @@ import java.util.*;
 @Service
 public class ReserveServiceImpl implements ReserveService {
     @Resource private AiDataScopeService dataScopeService;
+    @Resource private BedLifecycleSupport lifecycle;
+    @Resource private PlatformTransactionManager transactionManager;
     @Resource
     private CommonFunc commonFunc;
     @Resource
@@ -87,46 +93,40 @@ public class ReserveServiceImpl implements ReserveService {
     }
 
     @Override
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result addReserve(AddReserveQuery query) {
-        // 根据编号获取床位
-        Bed bed = bedFunc.getBedById(query.getBedId());
-        // 验证床位是否存在
-        AssertUtil.notNull(bed, ExceptionEnum.BED_NULL);
-        // 验证床位是否被占用
-        AssertUtil.isTrue(Objects.equals(bed.getBedFlag(), BedEnum.IDLE.getStatus()), ExceptionEnum.BED_OCCUPY);
-        // 根据身份证号获取老人信息
-        Elder elderByIdNum = elderFunc.getElderByIdNum(query.getIdNum());
-        if (ObjUtil.isEmpty(elderByIdNum)) {
-            // 初始化老人
-            Elder elder = elderFunc.operateReserveInitElder(query, true);
-            // 新增
+        AssertUtil.notNull(query.getBedId(), ExceptionEnum.PARAM_ERROR);
+        if (query.getIdNum() == null || query.getIdNum().trim().isEmpty())
+            throw new BusinessRuntimeException(400, "身份证号不能为空");
+        Reserve reserve = reserveFunc.operateReserveInitElder(query, null);
+        reserveFunc.assertUnexpired(reserve);
+        Elder existing = elderFunc.getElderByIdNum(query.getIdNum());
+        Elder elder;
+        if (existing == null) {
+            // Establish the unique identity before taking a bed lock. Roll back this row on any later failure.
+            elder = elderFunc.operateReserveInitElder(query, true);
+            elder.setBedId(null);
+            elder.setCheckFlag(CheckEnum.CONSULT.getStatus());
             elderMapper.insert(elder);
-            // 初始化预定
-            Reserve reserve = reserveFunc.operateReserveInitElder(query, elder.getId());
-            // 新增
-            reserveMapper.insert(reserve);
         } else {
-            dataScopeService.assertElderAccess(elderByIdNum.getId());
-            // 判断该老人状态
-            elderFunc.checkReserve(elderByIdNum);
-            // 封装老人修改
-            Elder elder = elderFunc.operateReserveInitElder(query, false);
-            elder.setId(elderByIdNum.getId());
-            // 修改老人
-            elderMapper.updateById(elder);
-            // 删除老人预定记录
-            reserveMapper.delete(new LambdaQueryWrapper<Reserve>()
-                    .eq(Reserve::getElderId, elder.getId()));
-            // 初始化预定
-            Reserve reserve = reserveFunc.operateReserveInitElder(query, elder.getId());
-            // 新增
-            reserveMapper.insert(reserve);
+            dataScopeService.assertElderAccess(existing.getId());
+            elder = lifecycle.lockElder(existing.getId());
+            dataScopeService.assertElderAccess(elder.getId());
+            if (!Objects.equals(elder.getIdNum(), query.getIdNum()))
+                throw new BusinessRuntimeException(409, "老人身份已变化，请刷新后重试");
         }
-        // 封装床位预定修改
-        bed.setBedFlag(BedEnum.RESERVE.getStatus());
-        // 修改床位预定
-        bedMapper.updateById(bed);
+        lifecycle.assertState(elder, CheckEnum.CONSULT.getStatus(), CheckEnum.INTENTION.getStatus(), CheckEnum.EXIT.getStatus());
+        Map<Long, Bed> beds = lifecycle.lockBeds(elder.getBedId(), query.getBedId());
+        Bed bed = lifecycle.requireBed(beds, query.getBedId());
+        lifecycle.assertBedState(bed, BedEnum.IDLE.getStatus());
+        if (elder.getBedId() != null || reserveMapper.selectActiveByElderForUpdate(elder.getId()) != null)
+            throw new BusinessRuntimeException(409, "老人仍有床位或有效预订，请核对后重试");
+        Elder change = elderFunc.operateReserveInitElder(query, false);
+        change.setId(elder.getId());
+        elderMapper.updateById(change);
+        reserve.setElderId(elder.getId());
+        reserveMapper.insert(reserve);
+        lifecycle.setBedState(bed, BedEnum.RESERVE.getStatus());
         return Result.success();
     }
 
@@ -145,87 +145,59 @@ public class ReserveServiceImpl implements ReserveService {
     }
 
     @Override
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result refund(Long reserveId) {
-        // 根据编号预定
-        Reserve reserve = reserveMapper.selectById(reserveId);
+        AssertUtil.notNull(reserveId, ExceptionEnum.PARAM_ERROR);
+        Reserve locator = reserveMapper.selectById(reserveId);
+        AssertUtil.notNull(locator, ExceptionEnum.DATA_NOT_EXIST);
+        dataScopeService.assertElderAccess(locator.getElderId());
+        Elder elder = lifecycle.lockElder(locator.getElderId());
+        dataScopeService.assertElderAccess(elder.getId());
+        Map<Long, Bed> beds = lifecycle.lockBeds(elder.getBedId(), locator.getBedId());
+        Reserve reserve = reserveMapper.selectByIdForUpdate(reserveId);
         AssertUtil.notNull(reserve, ExceptionEnum.DATA_NOT_EXIST);
-        dataScopeService.assertElderAccess(reserve.getElderId());
-        // 判断是否为空
-        AssertUtil.notNull(reserve, ExceptionEnum.DATA_NOT_EXIST);
-        // 判断是否已退款
-        AssertUtil.notTrue(Objects.equals(reserve.getReserveFlag(), YesNoEnum.YES.getCode()), ExceptionEnum.REFUND_REPEAT);
-        // 判断是否已过期
-        AssertUtil.notTrue(DateUtilWen.getDayEndTime(reserve.getDueDate()).before(new Date()), ExceptionEnum.DUE_DATE_EXPIRE);
-        // 封装修改预定
+        if (!Objects.equals(reserve.getElderId(), elder.getId()))
+            throw new BusinessRuntimeException(409, "预订归属已变化，请刷新后重试");
+        // A replay of a completed refund never touches the resident's later bed.
+        if (Reserve.REFUNDED.equals(reserve.getState())) return Result.success();
+        Bed bed = lifecycle.requireBed(beds, reserve.getBedId());
+        lifecycle.assertReservationBinding(elder, reserve, bed);
+        reserveFunc.assertUnexpired(reserve);
         reserve.setReserveFlag(YesNoEnum.YES.getCode());
-        // 修改预定
+        reserve.setState(Reserve.REFUNDED);
         reserveMapper.updateById(reserve);
-        // 根据编号获取老人
-        Elder elder = elderMapper.selectById(reserve.getElderId());
-        // 判断该老人状态
-        elderFunc.checkEnterOrExitAudit(elder);
-        // 如果老人状态为预定
-        if (Objects.equals(elder.getCheckFlag(), CheckEnum.RESERVE.getStatus())) {
-            // 修改老人
-            elderMapper.cancelReserveByElderIdList(new ArrayList<>(Collections.singletonList(elder.getId())));
-        }
-        // 根据编号获取床位
-        Bed bed = bedMapper.selectById(elder.getBedId());
-        // 如果床位状态为预定
-        if (Objects.equals(bed.getBedFlag(), BedEnum.RESERVE.getStatus())) {
-            // 封装修改床位
-            bed.setBedFlag(BedEnum.IDLE.getStatus());
-            // 修改床位
-            bedMapper.updateById(bed);
-        }
+        elderMapper.cancelReserveByElderIdList(Collections.singletonList(elder.getId()));
+        lifecycle.releaseBed(bed);
         return Result.success();
     }
 
     @Override
-    @Transactional
     public void reserveExpireJob() {
-        // 获取前一天当前时间
-        Date nowDayAroundTime = DateUtilWen.getNowDayAroundTime(new Date(), -1);
-        // 获取前一天结束时间
-        Date expireTime = DateUtilWen.getDayEndTime(nowDayAroundTime);
-        // 获取过期预定列表
-        List<ExpireReserveVo> expireReserveVoList = reserveMapper.listExpireReserve(expireTime);
-        // 验证预定列表是否为空
-        if (ObjUtil.isEmpty(expireReserveVoList)) {
-            return;
-        }
-        // 实例化删除预定编号列表
-        List<Long> reserveIdList = new ArrayList<>();
-        // 实例化修改老人编号列表
-        List<Long> elderIdList = new ArrayList<>();
-        // 实例化修改床位列表
-        List<Bed> bedList = new ArrayList<>();
-        expireReserveVoList.forEach(expireReserveVo -> {
-            reserveIdList.add(expireReserveVo.getReserveId());
-            // 若老人状态为预定
-            if (Objects.equals(expireReserveVo.getCheckFlag(), CheckEnum.RESERVE.getStatus())) {
-                elderIdList.add(expireReserveVo.getElderId());
-            }
-            // 若床位状态为预定
-            if (Objects.equals(expireReserveVo.getBedFlag(), BedEnum.RESERVE.getStatus())) {
-                Bed bed = new Bed();
-                bed.setId(expireReserveVo.getBedId());
-                bed.setBedFlag(BedEnum.IDLE.getStatus());
-                bedList.add(bed);
-            }
+        // Only IDs are carried across the scan. Each transaction rechecks current ownership and state.
+        Date today = cn.hutool.core.date.DateUtil.beginOfDay(new Date());
+        List<Long> ids = reserveMapper.listExpiredActiveIds(today);
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        transaction.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+        for (Long id : ids) transaction.execute(status -> {
+            expireOne(id);
+            return null;
         });
-        // 批量删除过期预定
-        if (ObjUtil.isNotEmpty(reserveIdList)) {
-            reserveMapper.deleteBatchIds(reserveIdList);
-        }
-        // 批量修改老人
-        if (ObjUtil.isNotEmpty(elderIdList)) {
-            elderMapper.cancelReserveByElderIdList(elderIdList);
-        }
-        // 批量修改床位
-        if (ObjUtil.isNotEmpty(bedList)) {
-            bedFunc.updateBatchById(bedList);
-        }
+    }
+
+    private void expireOne(Long id) {
+        Reserve locator = reserveMapper.selectById(id);
+        if (locator == null) return;
+        Elder elder = lifecycle.lockElder(locator.getElderId());
+        Map<Long, Bed> beds = lifecycle.lockBeds(elder.getBedId(), locator.getBedId());
+        Reserve reserve = reserveMapper.selectByIdForUpdate(id);
+        if (reserve == null || !Reserve.ACTIVE.equals(reserve.getState())) return;
+        if (reserve.getDueDate() == null || !DateUtilWen.getDayEndTime(reserve.getDueDate()).before(new Date())) return;
+        Bed bed = lifecycle.requireBed(beds, reserve.getBedId());
+        lifecycle.assertReservationBinding(elder, reserve, bed);
+        reserve.setState(Reserve.EXPIRED);
+        reserveMapper.updateById(reserve);
+        elderMapper.cancelReserveByElderIdList(Collections.singletonList(elder.getId()));
+        lifecycle.releaseBed(bed);
     }
 }

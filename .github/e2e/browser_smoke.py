@@ -10,6 +10,7 @@ import time
 import urllib.error
 import urllib.request
 import zipfile
+from datetime import datetime, timedelta
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -93,6 +94,8 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
 
                 def login(page, account):
                     page.goto(origin + "/#/login")
+                    # Element Plus loading buttons can have no disabled attribute while clicks are ignored.
+                    expect(page.get_by_role("button", name="登录", exact=True)).not_to_have_class(re.compile(r"\bis-loading\b"))
                     page.get_by_placeholder("账号", exact=True).fill(account)
                     page.get_by_placeholder("密码", exact=True).fill(password)
                     code = page.evaluate('window.captchaDigits.slice(-4).join("")')
@@ -140,6 +143,7 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
                 assert rejected.value.status == 401
                 assert rejected.value.json()["code"] == 401
                 expect(admin.get_by_role("button", name="登录", exact=True)).to_be_enabled()
+                expect(admin.get_by_role("button", name="登录", exact=True)).not_to_have_class(re.compile(r"\bis-loading\b"))
                 record("incorrect credentials return 401 and login remains usable")
                 login(admin, "13547584400")
                 admin.goto(origin + "/#/people/staff")
@@ -200,6 +204,101 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
                 assert downloaded.value.suggested_filename.endswith(".xlsx")
                 downloaded.value.save_as(str(evidence / "elder-export.xlsx"))
                 record("authenticated workbook downloads directly without a public file URL")
+
+                # Drive the actual booking and admission forms against the disposable database.
+                admin.goto(f"{origin}/?bed={time.monotonic_ns()}#/sale/book")
+                admin.get_by_role("button", name="新增", exact=True).click()
+                bed_booking = admin.get_by_role("dialog", name="新增", exact=True)
+                expect(bed_booking).to_be_visible()
+                bed_booking.locator(".el-form-item").filter(has_text="老人姓名").get_by_role("button").click()
+                elder_picker = admin.get_by_role("dialog", name="选择老人", exact=True)
+                elder_picker.locator(".el-form-item").filter(has_text="姓名").locator("input").fill("E2E预订")
+                click_api(admin, elder_picker.get_by_role("button", name="搜索", exact=True), "/api/reserve/pageSearchElderByKey", "GET")
+                elder_picker.locator(".el-table__body tbody tr").filter(has_text="E2E预订").get_by_role("button", name="选择", exact=True).click()
+                admin.locator(".el-popconfirm__action .el-button--warning").click()
+                expect(elder_picker).not_to_be_visible()
+                with admin.expect_response(lambda response: "/api/reserve/getBuildTree" in response.url) as tree_response:
+                    bed_booking.locator(".el-form-item").filter(has_text="预定床位").locator("input").click()
+                tree = tree_response.value.json()
+                assert tree["code"] == 200
+
+                def bed_path(nodes, bed_id):
+                    for node in nodes or []:
+                        if node.get("level") == 4 and node["id"] == bed_id:
+                            return [node["name"]]
+                        child = bed_path(node.get("childrenList"), bed_id)
+                        if child: return [node["name"], *child]
+                    return None
+
+                path = bed_path(tree["data"], 1)
+                assert path and len(path) == 4
+                bed_picker = admin.get_by_role("dialog", name="选择床位", exact=True)
+                for label in path:
+                    bed_picker.locator(".el-tree-node__label").get_by_text(label, exact=True).click()
+                expect(bed_picker).not_to_be_visible()
+                bed_booking.locator(".el-form-item").filter(has_text="预付定金").locator("input").fill("100")
+                bed_booking.locator(".el-form-item").filter(has_text="交款人姓名").locator("input").fill("测试亲属")
+                bed_booking.locator(".el-form-item").filter(has_text="交款人电话").locator("input").fill("19900003002")
+                due = bed_booking.locator(".el-form-item").filter(has_text="预定到期日期").locator("input")
+                due.fill((datetime.now() + timedelta(days=2)).strftime("%Y-%m-%d 23:00:00"))
+                due.press("Enter")
+                sales = bed_booking.locator(".el-form-item").filter(has_text="营销人员").locator(".el-select")
+                sales.click()
+                admin.locator(".el-select-dropdown__item:visible").first.click()
+                click_api(admin, bed_booking.get_by_role("button", name="提交", exact=True), "/api/reserve/addReserve")
+                expect(bed_booking).not_to_be_visible()
+                bed_row = admin.locator(".el-table__body tbody tr").filter(has_text="E2E预订")
+                expect(bed_row).to_contain_text("有效预订")
+                expect(bed_row.get_by_role("button", name="退款", exact=True)).to_be_visible()
+                record("reservation form creates an active booking on the selected free bed")
+
+                admin.goto(f"{origin}/?bed={time.monotonic_ns()}#/live/enter")
+                with admin.expect_response(lambda response: "/api/checkContract/listReserveStaff" in response.url) as admission_staff:
+                    admin.get_by_role("button", name="新增", exact=True).click()
+                admission = admin.get_by_role("dialog", name="新增", exact=True)
+                expect(admission).to_be_visible()
+                admission.locator(".el-form-item").filter(has_text="老人姓名").get_by_role("button").click()
+                elder_picker.locator(".el-form-item").filter(has_text="姓名").locator("input").fill("E2E预订")
+                click_api(admin, elder_picker.get_by_role("button", name="搜索", exact=True), "/api/checkContract/pageSearchElderByKey", "GET")
+                elder_picker.locator(".el-table__body tbody tr").filter(has_text="E2E预订").get_by_role("button", name="选择", exact=True).click()
+                admin.locator(".el-popconfirm__action .el-button--warning").click()
+                expect(elder_picker).not_to_be_visible()
+                expect(admission.locator(".el-form-item").filter(has_text="入住床位").locator("input")).to_have_value(path[-1])
+                for field, choice in [("护理等级", "一级护理"), ("餐饮套餐", "颐养套餐")]:
+                    select_option(admin, admission.locator(".el-form-item").filter(has_text=field).locator(".el-select"), choice)
+                select_option(admin, admission.locator(".el-form-item").filter(has_text="营销人员").locator(".el-select"),
+                              admission_staff.value.json()["data"][0]["name"])
+                signed = admission.locator(".el-form-item").filter(has_text="合同签订日期").locator("input")
+                signed.fill(datetime.now().strftime("%Y-%m-%d 00:00:00"))
+                signed.press("Enter")
+                period = admission.locator(".el-form-item").filter(has_text="合同有效期限").locator("input")
+                period.nth(0).fill(datetime.now().strftime("%Y-%m-%d"))
+                period.nth(1).fill((datetime.now() + timedelta(days=365)).strftime("%Y-%m-%d"))
+                period.nth(1).press("Enter")
+                contacts = admission.locator(".el-form-item").filter(has_text="紧急联系人")
+                contacts.get_by_role("button").first.click()
+                for placeholder, value in [("请输入姓名", "测试亲属"), ("请输入电话", "19900003002"),
+                                           ("请输入邮箱", "bed-e2e@example.com"), ("请输入关系", "亲属")]:
+                    contacts.get_by_placeholder(placeholder, exact=True).fill(value)
+                contacts.get_by_text("否", exact=True).click()
+                expect(contacts.get_by_role("radio", name="否", exact=True)).to_be_checked()
+                click_api(admin, admission.get_by_role("button", name="提交", exact=True), "/api/checkContract/addCheckContract")
+                expect(admission).not_to_be_visible()
+                admitted = admin.locator(".el-table__body tbody tr").filter(has_text="E2E预订")
+                expect(admitted).to_contain_text("入住")
+                expect(admitted.get_by_role("button", name="删除", exact=True)).to_have_count(0)
+                record("own reservation converts to admission on the same bed through the real form")
+
+                admin.goto(f"{origin}/?bed={time.monotonic_ns()}#/sale/book")
+                expect(bed_row).to_contain_text("已转入住")
+                expect(bed_row).to_contain_text(path[-1])
+                expect(bed_row.get_by_role("button", name="退款", exact=True)).to_have_count(0)
+                bed_row.get_by_role("button", name="查看", exact=True).click()
+                history = admin.get_by_role("dialog", name="查看", exact=True)
+                expect(history.locator(".el-form-item").filter(has_text="预定床位").locator("input")).to_have_value(path[-1])
+                expect(history.get_by_role("button", name="提交", exact=True)).to_have_count(0)
+                history.locator(".el-dialog__headerbtn").click()
+                record("converted reservation retains its bed history and cannot be refunded")
                 admin.goto(origin + "/#/charge/prestore")
                 account = admin.locator(".el-table__body tbody tr").filter(has_text="E2E可见")
                 expect(account).to_have_count(1)

@@ -4,6 +4,7 @@
 
     <select id="listReserveByKey" resultType="com.shanzhu.beadhouse.entity.vo.PageReserveByKeyVo">
         SELECT r.id AS reserve_id,
+        r.bed_id, r.state, r.due_date,
         e.id AS elder_id,
         s.`name` AS staff_name,
         b.`name` AS bed_name,
@@ -17,7 +18,7 @@
         e.check_flag AS check_flag
         FROM reserve r
         LEFT JOIN elder e ON e.id = r.elder_id
-        LEFT JOIN bed b ON b.id = e.bed_id
+        LEFT JOIN bed b ON b.id = r.bed_id
         LEFT JOIN staff s ON s.id = r.staff_id
         <where>
             r.id IS NOT NULL
@@ -35,6 +36,7 @@
     <select id="getReserveByReserveIdAndElderId"
             resultType="com.shanzhu.beadhouse.entity.vo.GetReserveByReserveIdAndElderIdVo">
         SELECT
+        r.bed_id, r.state,
         e.`name` AS elder_name,
         e.id_num AS id_num,
         e.sex AS elder_sex,
@@ -50,7 +52,7 @@
         FROM
         reserve r
         LEFT JOIN elder e ON e.id = r.elder_id
-        LEFT JOIN bed b ON b.id = e.bed_id
+        LEFT JOIN bed b ON b.id = r.bed_id
         LEFT JOIN staff s ON s.id = r.staff_id
         <where>
             r.id = #{idQuery.reserveId}
@@ -65,8 +67,8 @@
                b.bed_flag
         FROM reserve r
                  LEFT JOIN elder e ON e.id = r.elder_id
-                 LEFT JOIN bed b ON b.id = e.bed_id
+                 LEFT JOIN bed b ON b.id = r.bed_id
         WHERE r.due_date &lt; #{expireTime}
-          AND r.reserve_flag = 'N'
+          AND r.reserve_flag = 'N' AND r.state = 'ACTIVE'
     </select>
 </mapper>

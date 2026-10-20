@@ -23,6 +23,9 @@ import com.shanzhu.beadhouse.service.CheckContractService;
 import com.shanzhu.beadhouse.service.common.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Isolation;
+import com.shanzhu.beadhouse.common.config.exception.BusinessRuntimeException;
+import java.util.Map;
 
 import javax.annotation.Resource;
 import java.math.BigDecimal;
@@ -35,6 +38,8 @@ import java.util.Objects;
 public class CheckContractServiceImpl implements CheckContractService {
     @Resource
     private com.shanzhu.beadhouse.service.common.AiDataScopeService dataScopeService;
+    @Resource private BedLifecycleSupport lifecycle;
+    @Resource private ReserveFunc reserveFunc;
     @Resource
     private ElderMapper elderMapper;
     @Resource
@@ -110,59 +115,53 @@ public class CheckContractServiceImpl implements CheckContractService {
     }
 
     @Override
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result addCheckContract(OperateCheckContractQuery query) {
-        // 根据编号获取床位
-        Bed bed = bedFunc.getBedById(query.getBedId());
-        // 验证床位是否存在
-        AssertUtil.notNull(bed, ExceptionEnum.BED_NULL);
-        // 验证床位是否被占用
-        AssertUtil.isTrue(Objects.equals(bed.getBedFlag(), BedEnum.IDLE.getStatus()), ExceptionEnum.BED_OCCUPY);
-        // 根据身份证号获取老人信息
-        Elder elderByIdNum = elderFunc.getElderByIdNum(query.getIdNum());
-        if (ObjUtil.isEmpty(elderByIdNum)) {
-            // 初始化老人
-            query.setId(null);
-            Elder elder = BeanUtil.toBean(query, Elder.class);
-            elder.setBalance(BigDecimal.valueOf(0));
-            elder.setCheckFlag(CheckEnum.ENTER.getStatus());
-            // 新增
+        AssertUtil.notNull(query.getBedId(), ExceptionEnum.PARAM_ERROR);
+        if (query.getIdNum() == null || query.getIdNum().trim().isEmpty())
+            throw new BusinessRuntimeException(400, "身份证号不能为空");
+        Elder existing = elderFunc.getElderByIdNum(query.getIdNum());
+        Elder elder;
+        if (existing == null) {
+            elder = BeanUtil.toBean(query, Elder.class);
+            elder.setId(null);
+            elder.setBedId(null);
+            elder.setBalance(BigDecimal.ZERO);
+            elder.setCheckFlag(CheckEnum.CONSULT.getStatus());
             elderMapper.insert(elder);
-            elderByIdNum = elder;
         } else {
-            // 判断该老人状态
-            dataScopeService.assertElderAccess(elderByIdNum.getId());
-            elderFunc.checkEnterOrExitAudit(elderByIdNum);
-            // 老人状态为预定 && 老人预定床位编号和传入床位编号不相等
-            boolean editFlag = Objects.equals(elderByIdNum.getCheckFlag(), CheckEnum.RESERVE.getStatus()) &&
-                    !Objects.equals(elderByIdNum.getBedId(), query.getBedId());
-            // 将之前预定床位状态修改为空闲
-            if (editFlag) {
-                // 根据编号获取之前预定床位
-                Bed temporaryBed = bedMapper.selectById(elderByIdNum.getBedId());
-                // 床位存在 && 床位状态为预定
-                if (ObjUtil.isNotEmpty(temporaryBed) && Objects.equals(temporaryBed.getBedFlag(), BedEnum.RESERVE.getStatus())) {
-                    temporaryBed.setBedFlag(BedEnum.IDLE.getStatus());
-                    bedMapper.updateById(temporaryBed);
-                }
-            }
-            // 封装修改
-            query.setId(elderByIdNum.getId());
-            BeanUtil.copyProperties(query, elderByIdNum);
-            elderByIdNum.setCheckFlag(CheckEnum.ENTER.getStatus());
-            // 修改
-            elderMapper.updateById(elderByIdNum);
+            dataScopeService.assertElderAccess(existing.getId());
+            elder = lifecycle.lockElder(existing.getId());
+            dataScopeService.assertElderAccess(elder.getId());
+            if (!Objects.equals(elder.getIdNum(), query.getIdNum()))
+                throw new BusinessRuntimeException(409, "老人身份已变化，请刷新后重试");
         }
-        // 封装床位入住修改
-        bed.setBedFlag(BedEnum.ENTER.getStatus());
-        // 修改床位入住
-        bedMapper.updateById(bed);
-        // 批量插入紧急联系人
-        emergencyContactFunc.saveBatchEmergencyContact(query, elderByIdNum.getId(), false);
-        // 新增合同
-        contractFunc.insertContract(query, elderByIdNum.getId());
-        // 删除老人预定记录
-        reserveMapper.delete(new LambdaQueryWrapper<Reserve>().eq(Reserve::getElderId, elderByIdNum.getId()));
+        lifecycle.assertState(elder, CheckEnum.CONSULT.getStatus(), CheckEnum.INTENTION.getStatus(),
+                CheckEnum.RESERVE.getStatus(), CheckEnum.EXIT.getStatus());
+        Map<Long, Bed> beds = lifecycle.lockBeds(elder.getBedId(), query.getBedId());
+        Bed target = lifecycle.requireBed(beds, query.getBedId());
+        Reserve reservation = reserveMapper.selectActiveByElderForUpdate(elder.getId());
+        Bed previous = null;
+        if (CheckEnum.RESERVE.getStatus().equals(elder.getCheckFlag())) {
+            previous = lifecycle.requireBed(beds, elder.getBedId());
+            lifecycle.assertReservationBinding(elder, reservation, previous);
+            reserveFunc.assertUnexpired(reservation);
+        } else if (elder.getBedId() != null || reservation != null) {
+            throw new BusinessRuntimeException(409, "老人仍有床位或有效预订，请核对后重试");
+        }
+        if (previous == null || !Objects.equals(previous.getId(), target.getId()))
+            lifecycle.assertBedState(target, BedEnum.IDLE.getStatus());
+        if (reservation != null) {
+            reservation.setState(Reserve.CONVERTED);
+            reserveMapper.updateById(reservation);
+        }
+        if (previous != null && !Objects.equals(previous.getId(), target.getId())) lifecycle.releaseBed(previous);
+        BeanUtil.copyProperties(query, elder, "id");
+        elder.setCheckFlag(CheckEnum.ENTER.getStatus());
+        elderMapper.updateById(elder);
+        lifecycle.setBedState(target, BedEnum.ENTER.getStatus());
+        emergencyContactFunc.saveBatchEmergencyContact(query, elder.getId(), false);
+        contractFunc.insertContract(query, elder.getId());
         return Result.success();
     }
 
@@ -190,57 +189,42 @@ public class CheckContractServiceImpl implements CheckContractService {
     }
 
     @Override
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result editCheckContract(OperateCheckContractQuery query) {
         dataScopeService.assertElderAccess(query.getId());
-        // 验证老人
-        Elder elder = elderFunc.checkElder(query.getId(), query.getIdNum());
-        // 若床位编号不一致
-        if (!Objects.equals(elder.getBedId(), query.getBedId())) {
-            // 判断床位是否被占用
-            Bed bed = bedFunc.getBedById(query.getBedId());
-            // 验证床位是否存在
-            AssertUtil.notNull(bed, ExceptionEnum.BED_NULL);
-            // 验证床位是否被占用
-            AssertUtil.isTrue(Objects.equals(bed.getBedFlag(), BedEnum.IDLE.getStatus()), ExceptionEnum.BED_OCCUPY);
-            // 将之前选择的床位设置为空闲
-            Bed idleBed = new Bed();
-            idleBed.setId(elder.getBedId());
-            idleBed.setBedFlag(BedEnum.IDLE.getStatus());
-            // 修改
-            bedMapper.updateById(idleBed);
-            // 将此次选择的床位设置为入住
-            Bed enterBed = new Bed();
-            enterBed.setId(query.getBedId());
-            enterBed.setBedFlag(BedEnum.ENTER.getStatus());
-            // 修改
-            bedMapper.updateById(enterBed);
+        Elder elder = lifecycle.lockElder(query.getId());
+        dataScopeService.assertElderAccess(elder.getId());
+        lifecycle.assertState(elder, CheckEnum.ENTER.getStatus());
+        AssertUtil.notNull(query.getBedId(), ExceptionEnum.PARAM_ERROR);
+        if (query.getIdNum() == null || query.getIdNum().trim().isEmpty())
+            throw new BusinessRuntimeException(400, "身份证号不能为空");
+        Map<Long, Bed> beds = lifecycle.lockBeds(elder.getBedId(), query.getBedId());
+        Bed oldBed = lifecycle.requireBed(beds, elder.getBedId());
+        Bed target = lifecycle.requireBed(beds, query.getBedId());
+        lifecycle.assertBedState(oldBed, BedEnum.ENTER.getStatus());
+        if (!Objects.equals(oldBed.getId(), target.getId())) {
+            lifecycle.assertBedState(target, BedEnum.IDLE.getStatus());
+            lifecycle.releaseBed(oldBed);
+            lifecycle.setBedState(target, BedEnum.ENTER.getStatus());
         }
-        // 封装修改老人
-        BeanUtil.copyProperties(query, elder);
-        // 修改
+        BeanUtil.copyProperties(query, elder, "id");
         elderMapper.updateById(elder);
-        // 批量插入紧急联系人
         emergencyContactFunc.saveBatchEmergencyContact(query, elder.getId(), true);
-        // 新增合同
         contractFunc.insertContract(query, elder.getId());
         return Result.success();
     }
 
     @Override
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result deleteCheckContract(Long elderId) {
         dataScopeService.assertElderAccess(elderId);
-        // 验证老人
-        Elder elder = elderFunc.checkElder(elderId, null);
-        // 根据编号逻辑删除老人
+        Elder elder = lifecycle.lockElder(elderId);
+        dataScopeService.assertElderAccess(elder.getId());
+        // Active occupation must go through the explicit checkout approval workflow.
+        lifecycle.assertState(elder, CheckEnum.EXIT.getStatus());
+        if (elder.getBedId() != null)
+            throw new BusinessRuntimeException(409, "老人仍有关联床位，不能失效合同");
         elderMapper.deleteElderById(elderId);
-        // 封装床位修改
-        Bed bed = new Bed();
-        bed.setId(elder.getBedId());
-        bed.setBedFlag(BedEnum.IDLE.getStatus());
-        // 修改床位
-        bedMapper.updateById(bed);
         return Result.success();
     }
 }

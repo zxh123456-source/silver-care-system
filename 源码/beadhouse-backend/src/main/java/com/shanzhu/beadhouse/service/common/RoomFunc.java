@@ -155,21 +155,17 @@ public class RoomFunc {
                     // 床位
                     RoomItem bedVo = BeanUtil.toBean(bed, RoomItem.class);
                     // 封装床位老人信息
-                    elderList.forEach(elder -> {
-                        boolean existFlag = false;
+                    boolean existFlag = false;
+                    for (Elder elder : elderList) {
                         if (Objects.equals(elder.getBedId(), bed.getId())) {
                             existFlag = true;
                             bedVo.setElderName(elder.getName());
                             bedVo.setSex(elder.getSex());
                             bedVo.setAge(elder.getAge());
+                            break;
                         }
-                        // ((elderNameFlag && existFlag) || (!elderNameFlag && existFlag)) && !bedVoList.contains(bedVo)
-                        // ((搜索关键字老人姓名不为空 && 该床位有老人) || (搜索关键字老人姓名为空)) && !bedVoList.contains(bedVo)
-                        boolean addFlag = (!elderNameFlag || existFlag) && !bedVoList.contains(bedVo);
-                        if (addFlag) {
-                            bedVoList.add(bedVo);
-                        }
-                    });
+                    }
+                    if (!Boolean.TRUE.equals(elderNameFlag) || existFlag) bedVoList.add(bedVo);
                 }
             });
             if (ObjUtil.isNotEmpty(bedVoList)) {

@@ -12,6 +12,9 @@ import java.math.BigDecimal;
 @Data
 @ApiModel(value = "分页查询预定响应实体")
 public class PageReserveByKeyVo extends Rank {
+    private Long bedId;
+    private String state;
+    private java.util.Date dueDate;
     @ApiModelProperty(value = "预定编号", example = "1")
     private Long reserveId;
     @ApiModelProperty(value = "老人编号", example = "1")

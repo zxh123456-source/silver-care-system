@@ -27,17 +27,22 @@ class LegacyScopeSqlIntegrationTest {
                 try (Statement st = conn.createStatement()) {
                     // This suite verifies assignment-only care stages. Historical sales links in
                     // the demo dump must not turn unrelated pre-admission rows into allowed rows.
-                    st.executeUpdate("UPDATE elder SET check_flag='入住'");
+                    // Invalidated demo identities may intentionally duplicate a live identity.
+                    st.executeUpdate("UPDATE elder SET check_flag='入住' WHERE check_flag<>'已失效'");
                     st.executeUpdate("UPDATE elder SET name='allowed',check_flag='退住审核' WHERE id=4");
                     st.executeUpdate("UPDATE elder SET name='foreign',check_flag='退住审核' WHERE id=8");
                     st.executeUpdate("DELETE FROM elder_staff_assignment");
                     st.executeUpdate("INSERT INTO elder_staff_assignment(elder_id,staff_id,active) VALUES(4,4,'Y')");
-                    for (String table : Arrays.asList("accident","outward","nurse_reserve","order","consume","retreat_apply")) {
+                    for (String table : Arrays.asList("accident","outward","nurse_reserve","order","consume")) {
                         cloneFirstRow(conn,table);
                         st.executeUpdate("UPDATE `"+table+"` SET elder_id=4");
                         st.executeUpdate("UPDATE `"+table+"` SET elder_id=8 ORDER BY id LIMIT 1");
                     }
-                    st.executeUpdate("UPDATE retreat_apply SET apply_flag='待审核'");
+                    // One real pending application per resident, rather than duplicate pending rows.
+                    // This entire fixture rolls back with the surrounding SQL session.
+                    st.executeUpdate("DELETE FROM retreat_apply");
+                    st.executeUpdate("INSERT INTO retreat_apply(elder_id,apply_flag,create_id,create_time,update_id,update_time) "
+                            + "VALUES(4,'待审核',1,NOW(),1,NOW()),(8,'待审核',1,NOW(),1,NOW())");
                     st.executeUpdate("UPDATE accident SET del_flag='N'");
                     st.executeUpdate("UPDATE outward SET del_flag='N'");
                 }
@@ -80,7 +85,8 @@ class LegacyScopeSqlIntegrationTest {
     private void cloneFirstRow(Connection conn,String table) throws Exception {
         List<String> columns = new ArrayList<>();
         try (ResultSet rs=conn.getMetaData().getColumns(null,null,table,null)) {
-            while(rs.next()) if(!"id".equals(rs.getString("COLUMN_NAME"))) columns.add("`"+rs.getString("COLUMN_NAME")+"`");
+            while(rs.next()) if(!"id".equals(rs.getString("COLUMN_NAME")) && !"YES".equals(rs.getString("IS_GENERATEDCOLUMN")))
+                columns.add("`"+rs.getString("COLUMN_NAME")+"`");
         }
         String cols=String.join(",",columns);
         try(Statement st=conn.createStatement()) {

@@ -20,6 +20,9 @@ import com.shanzhu.beadhouse.entity.vo.*;
 import com.shanzhu.beadhouse.service.IntentionService;
 import com.shanzhu.beadhouse.service.common.*;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Isolation;
+import com.shanzhu.beadhouse.common.config.exception.BusinessRuntimeException;
 
 import javax.annotation.Resource;
 import java.math.BigDecimal;
@@ -28,6 +31,7 @@ import java.util.stream.Collectors;
 
 @Service
 public class IntentionServiceImpl implements IntentionService {
+    @Resource private BedLifecycleSupport bedLifecycle;
     @Resource
     private com.shanzhu.beadhouse.service.common.AiDataScopeService dataScopeService;
     @Resource
@@ -129,6 +133,7 @@ public class IntentionServiceImpl implements IntentionService {
     }
 
     @Override
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result addIntention(OperateIntentionQuery query) {
         // 根据身份证号获取老人信息
         Elder elderByIdNum = elderFunc.getElderByIdNum(query.getIdNum());
@@ -142,10 +147,15 @@ public class IntentionServiceImpl implements IntentionService {
         } else {
             // 判断该老人状态
             dataScopeService.assertElderAccess(elderByIdNum.getId());
-            elderFunc.checkIntention(elderByIdNum);
+            Elder stored = bedLifecycle.lockElder(elderByIdNum.getId());
+            dataScopeService.assertElderAccess(stored.getId());
+            if (!Objects.equals(stored.getIdNum(), query.getIdNum()))
+                throw new BusinessRuntimeException(409, "老人身份信息已改变，请刷新后重试");
+            bedLifecycle.assertState(stored, CheckEnum.CONSULT.getStatus(), CheckEnum.EXIT.getStatus());
             // 封装修改
             Elder elder = BeanUtil.toBean(query, Elder.class);
             elder.setId(elderByIdNum.getId());
+            elder.setCheckFlag(CheckEnum.INTENTION.getStatus());
             // 修改
             elderMapper.updateById(elder);
         }
@@ -169,7 +179,10 @@ public class IntentionServiceImpl implements IntentionService {
     }
 
     @Override
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result editIntention(OperateIntentionQuery query) {
+        dataScopeService.assertElderAccess(query.getId());
+        bedLifecycle.lockElder(query.getId());
         dataScopeService.assertElderAccess(query.getId());
         // 验证老人
         elderFunc.checkElder(query.getId(), query.getIdNum());

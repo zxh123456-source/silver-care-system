@@ -65,7 +65,7 @@ def main():
         subprocess.run([docker, "exec", "-e", "MYSQL_PWD=scope-test-only", container,
                         "mysql", "-uroot", "-e", "DROP DATABASE IF EXISTS db_beadhouse; CREATE DATABASE db_beadhouse CHARACTER SET utf8mb4;"],
                        check=True, stdout=subprocess.DEVNULL, creationflags=creationflags)
-        for name in ("db_beadhouse.sql", "ai_care_upgrade.sql", "daily_task_upgrade.sql", "care_alert_upgrade.sql", "recharge_ledger_upgrade.sql", "attachment_access_upgrade.sql"):
+        for name in ("db_beadhouse.sql", "ai_care_upgrade.sql", "daily_task_upgrade.sql", "care_alert_upgrade.sql", "recharge_ledger_upgrade.sql", "attachment_access_upgrade.sql", "bed_lifecycle_upgrade.sql"):
             subprocess.run([docker, "exec", "-i", "-e", "MYSQL_PWD=scope-test-only", container,
                             "mysql", "--default-character-set=utf8mb4", "-uroot", "db_beadhouse"],
                            input=(ROOT / "数据库" / name).read_bytes(), check=True, stdout=subprocess.DEVNULL,

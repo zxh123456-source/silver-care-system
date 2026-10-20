@@ -21,8 +21,11 @@ import com.shanzhu.beadhouse.entity.vo.PageSearchElderByKeyVo;
 import com.shanzhu.beadhouse.service.RetreatApplyService;
 import com.shanzhu.beadhouse.service.common.CommonFunc;
 import com.shanzhu.beadhouse.service.common.RetreatApplyFunc;
+import com.shanzhu.beadhouse.service.common.BedLifecycleSupport;
+import com.shanzhu.beadhouse.common.config.exception.BusinessRuntimeException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Isolation;
 
 import javax.annotation.Resource;
 import java.util.*;
@@ -31,6 +34,7 @@ import java.util.stream.Collectors;
 
 @Service
 public class RetreatApplyServiceImpl implements RetreatApplyService {
+    @Resource private BedLifecycleSupport bedLifecycle;
     @Resource
     private com.shanzhu.beadhouse.service.common.AiDataScopeService dataScopeService;
     @Resource
@@ -78,15 +82,16 @@ public class RetreatApplyServiceImpl implements RetreatApplyService {
     }
 
     @Override
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result addRetreatApply(Long elderId) {
         dataScopeService.assertElderAccess(elderId);
-        // 根据编号获取老人
-        Elder elder = elderMapper.selectById(elderId);
-        // 验证老人是否存在
-        AssertUtil.notNull(elder, ExceptionEnum.DATA_NOT_EXIST);
-        // 验证老人是否为入住状态
-        AssertUtil.isTrue(Objects.equals(elder.getCheckFlag(), CheckEnum.ENTER.getStatus()), ExceptionEnum.ELDER_NOT_ENTER);
+        Elder elder = bedLifecycle.lockElder(elderId);
+        dataScopeService.assertElderAccess(elderId);
+        bedLifecycle.assertState(elder, CheckEnum.ENTER.getStatus());
+        Bed bed = bedLifecycle.requireBed(bedLifecycle.lockBeds(elder.getBedId()), elder.getBedId());
+        bedLifecycle.assertBedState(bed, BedEnum.ENTER.getStatus());
+        if (retreatApplyMapper.selectPendingForUpdate(elderId) != null)
+            throw new BusinessRuntimeException(409, "该老人已有待审核退住申请");
         // 初始化退住申请
         RetreatApply retreatApply = new RetreatApply();
         retreatApply.setElderId(elderId);
@@ -97,12 +102,7 @@ public class RetreatApplyServiceImpl implements RetreatApplyService {
         elder.setCheckFlag(CheckEnum.EXIT_AUDIT.getStatus());
         // 修改
         elderMapper.updateById(elder);
-        // 封装床位修改
-        Bed bed = new Bed();
-        bed.setId(elder.getBedId());
-        bed.setBedFlag(BedEnum.EXIT_AUDIT.getStatus());
-        // 修改
-        bedMapper.updateById(bed);
+        bedLifecycle.setBedState(bed, BedEnum.EXIT_AUDIT.getStatus());
         return Result.success();
     }
 }
