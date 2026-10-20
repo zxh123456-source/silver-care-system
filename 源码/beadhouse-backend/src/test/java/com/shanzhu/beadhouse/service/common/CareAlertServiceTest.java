@@ -30,8 +30,9 @@ class CareAlertServiceTest {
     @Test void newEvidenceGetsNewTaskWhenPreviousTaskWasCompleted() {
         MedicationPlan plan=new MedicationPlan(); plan.setId(1L); plan.setElderId(4L); plan.setMedicineName("测试");
         MedicationExecution execution=new MedicationExecution(); execution.setExecutionDate(new Date()); execution.setPeriod("早"); execution.setStatus("SKIPPED"); execution.setNote("已人工核对");
-        DailyTask completed=new DailyTask(); completed.setState("DONE");
+        DailyTask completed=new DailyTask(); completed.setId(3L); completed.setState("DONE");
         when(taskMapper.selectOne(any())).thenReturn(completed);
+        when(taskMapper.lockById(3L)).thenReturn(completed);
         service.medication(plan,execution);
         ArgumentCaptor<CareAlert> alert=ArgumentCaptor.forClass(CareAlert.class); verify(alertMapper).upsertEvidence(alert.capture());
         ArgumentCaptor<DailyTask> task=ArgumentCaptor.forClass(DailyTask.class); verify(taskMapper).upsertSnapshot(task.capture());

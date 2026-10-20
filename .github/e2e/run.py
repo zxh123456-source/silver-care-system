@@ -43,6 +43,9 @@ def main():
                SPRING_REDIS_PORT="16390", JWT_SECRET=secrets.token_hex(32),
                DEMO_ACCOUNT_PASSWORD=secrets.token_hex(24), AI_RAG_ENABLED="false", AI_PROVIDER_ENABLED="false",
                PASSWORD_RESET_EMAIL_ENABLED="false", TZ="Asia/Shanghai", NO_PROXY="127.0.0.1,localhost")
+    env.update(AI_ALERT_SCAN_ENABLED="true", AI_ALERT_SCAN_INITIAL_DELAY_MS="10",
+               AI_ALERT_SCAN_DELAY_MS="100", AI_ALERT_SCAN_MAX_BATCHES="32",
+               AI_ALERT_SCAN_RESCAN_SECONDS="3600")
     redis_name = "silvercare-e2e-redis-" + uuid.uuid4().hex
     redis_created, backend, failed = False, None, True
     started = time.monotonic()

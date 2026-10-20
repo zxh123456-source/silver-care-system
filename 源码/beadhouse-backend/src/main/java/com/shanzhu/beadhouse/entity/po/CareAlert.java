@@ -16,6 +16,7 @@ public class CareAlert {
     private String state;
     private Long reviewerId;
     private Integer revision;
+    private Long noticeRevision;
     private String resolutionNote;
     private Date resolvedAt;
     private Date createTime;

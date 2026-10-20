@@ -12,6 +12,27 @@
     <div v-if="overview" class="stats">
       <el-card v-for="item in statCards" :key="item.label" shadow="never"><small>{{ item.label }}</small><strong>{{ item.value }}</strong></el-card>
     </div>
+    <el-card v-if="notificationsAllowed" class="task-center notification-center" shadow="never">
+      <template #header>
+        <div class="table-toolbar">
+          <span>我的未读提醒（{{ notificationCount === null ? '待刷新' : notificationCount }}）</span>
+          <el-button :loading="notificationLoading" @click="refreshNotifications">刷新提醒</el-button>
+        </div>
+      </template>
+      <el-alert title="缺少登记仅表示待人工核对。标记已读只影响您自己的提醒，不会确认或解除告警；来源出现新证据会再次提醒。" type="info" :closable="false" />
+      <el-alert :title="scanStatusText" :type="scanStatus?.enabled === false || scanStatus?.state === 'RETRY_PENDING' ? 'warning' : 'info'" :closable="false" />
+      <el-alert v-if="notificationError" :title="notificationError" type="warning" :closable="false" />
+      <el-table :data="notifications" stripe empty-text="当前没有未读提醒">
+        <el-table-column prop="elderName" label="老人" width="100" />
+        <el-table-column label="类别" width="130"><template #default="scope">{{ alertKind(scope.row.kind) }}</template></el-table-column>
+        <el-table-column prop="detail" label="待核对证据" min-width="260" show-overflow-tooltip />
+        <el-table-column label="告警状态" width="100"><template #default="scope">{{ alertStatus(scope.row.state) }}</template></el-table-column>
+        <el-table-column label="个人提醒" width="110"><template #default="scope">
+          <el-button link type="primary" :disabled="notificationReading" @click="readNotification(scope.row)">标记已读</el-button>
+        </template></el-table-column>
+      </el-table>
+      <el-button v-if="notificationHasMore" :loading="notificationLoading" @click="loadMoreNotifications">加载更多提醒</el-button>
+    </el-card>
     <el-card class="task-center" shadow="never">
       <template #header>
         <div class="table-toolbar">
@@ -109,8 +130,14 @@
 <script setup lang="ts">
 import { computed, onActivated, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
+import { useCareNotifications } from "@/utils/careNotifications";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { getDailyOverview, listDailyTasks, syncDailyTasks, dailyTaskOwners, actDailyTask, listCareAlerts, scanCareAlerts, actCareAlert } from "@/apis/aiDaily";
+
+const { allowed: notificationsAllowed, unreadCount: notificationCount, items: notifications,
+  loading: notificationLoading, reading: notificationReading, error: notificationError,
+  hasMore: notificationHasMore, refresh: refreshNotifications, loadMore: loadMoreNotifications,
+  scanStatus, scanStatusText, markRead: readNotification } = useCareNotifications(true);
 
 const pad = (value: number) => String(value).padStart(2, "0");
 const now = new Date();
@@ -147,6 +174,7 @@ async function alertAction(action: "ack" | "resolve", row: any, note?: string) {
     const res: any = await actCareAlert(action, { id: row.id, revision: row.revision, note });
     if (res.code !== 200) ElMessage.warning(res.msg); else ElMessage.success("告警已更新");
     await load();
+    await refreshNotifications();
   } finally { alertBusy.value = false; }
 }
 async function ackAlert(row: any) { await alertAction("ack", row); }

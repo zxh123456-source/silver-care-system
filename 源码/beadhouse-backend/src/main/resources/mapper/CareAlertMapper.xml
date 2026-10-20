@@ -9,6 +9,7 @@
             reviewer_id=IF(evidence_key != VALUES(evidence_key),NULL,reviewer_id),
             resolution_note=IF(evidence_key != VALUES(evidence_key),NULL,resolution_note),
             resolved_at=IF(evidence_key != VALUES(evidence_key),NULL,resolved_at),
+            notice_revision=IF(evidence_key != VALUES(evidence_key),notice_revision+1,notice_revision),
             revision=IF(evidence_key != VALUES(evidence_key),revision+1,revision),
             kind=VALUES(kind),detail=VALUES(detail),task_key=VALUES(task_key),evidence_key=VALUES(evidence_key)
     </insert>
@@ -17,7 +18,7 @@
     </select>
     <update id="resolveRecorded">
         UPDATE ai_care_alert SET resolution_note=IF(state='RESOLVED',resolution_note,'执行记录已登记为已执行，仍可查看历史'),
-            resolved_at=IF(state='RESOLVED',resolved_at,NOW()),state='RESOLVED',evidence_key=REPEAT('0',64),revision=revision+1
+            resolved_at=IF(state='RESOLVED',resolved_at,NOW()),state='RESOLVED',evidence_key=REPEAT('0',64),revision=revision+1,notice_revision=notice_revision+1
         WHERE alert_key=#{key} AND evidence_key != REPEAT('0',64)
     </update>
 </mapper>

@@ -23,6 +23,21 @@ public class AiDailyController {
     private com.shanzhu.beadhouse.service.common.DailyTaskService taskService;
     @Resource
     private com.shanzhu.beadhouse.service.common.CareAlertService alerts;
+    @Resource
+    private com.shanzhu.beadhouse.service.common.CareNotificationService notifications;
+
+    @GetMapping("/notifications")
+    public Result notifications(@RequestParam(defaultValue="0") Long afterId,
+                                @RequestParam(defaultValue="20") Integer limit,@RequestHeader String token) {
+        return notifications.list(afterId,limit);
+    }
+    @GetMapping("/notification-count")
+    public Result notificationCount(@RequestHeader String token) { return notifications.count(); }
+    @PostMapping("/notifications/read")
+    public Result readNotification(@RequestBody com.shanzhu.beadhouse.entity.query.CareNotificationReadQuery query,
+                                   @RequestHeader String token) { return notifications.read(query); }
+    @GetMapping("/scan-status")
+    public Result scanStatus(@RequestHeader String token) { return notifications.scanStatus(); }
 
     @GetMapping("/alerts")
     public Result alerts(@RequestParam(defaultValue="ACTIVE") String state,@RequestHeader String token) {

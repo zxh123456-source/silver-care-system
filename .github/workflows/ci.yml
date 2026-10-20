@@ -119,7 +119,7 @@ jobs:
           exit 1
       - name: Build and run all backend tests
         run: mvn --batch-mode --no-transfer-progress -Dfile.encoding=UTF-8 verify
-      - name: Require all fourteen integration suites to execute
+      - name: Require all fifteen integration suites to execute
         if: always()
         run: |
           python3 - <<'PY'
@@ -132,6 +132,7 @@ jobs:
               'DailyTaskHttpIntegrationTest',
               'CareAlertHttpIntegrationTest',
               'CareAlertConcurrencyHttpIntegrationTest',
+              'AlertAutomationHttpIntegrationTest',
               'PasswordResetGuardIntegrationTest',
               'AuthLifecycleHttpIntegrationTest',
               'FileUploadHttpIntegrationTest',
@@ -198,6 +199,8 @@ jobs:
         run: npm run test:resources
       - name: Verify bed lifecycle form contracts
         run: npm run test:bed
+      - name: Verify notification polling, scope and sessions
+        run: npm run test:notifications
       - name: Build with TypeScript and ESLint checks
         run: npm run build
       - name: Upload verified frontend for browser tests

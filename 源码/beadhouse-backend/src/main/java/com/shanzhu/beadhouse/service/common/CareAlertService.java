@@ -12,10 +12,10 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.annotation.Isolation;
 import javax.annotation.Resource;
 import java.util.*;
-import java.text.SimpleDateFormat;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.stream.Collectors;
+import java.time.ZoneId;
 
 @Service
 public class CareAlertService {
@@ -43,6 +43,10 @@ public class CareAlertService {
 
     public void medication(MedicationPlan plan,MedicationExecution execution) {
         scope.assertElderAccess(plan.getElderId());
+        medicationEvidence(plan,execution);
+    }
+
+    private void medicationEvidence(MedicationPlan plan,MedicationExecution execution) {
         String key=medicationKey(plan.getId(),execution.getExecutionDate(),execution.getPeriod());
         if("DONE".equals(execution.getStatus())) { alertMapper.resolveRecorded(key); return; }
         store(key,plan.getElderId(),plan.getId(),"MEDICATION_SKIPPED",
@@ -65,18 +69,26 @@ public class CareAlertService {
             MedicationPlan plan=planMapper.lockById(candidate.getId());
             if(plan==null || plan.getStartDate().after(requested) || (plan.getEndDate()!=null && plan.getEndDate().before(requested))) continue;
             scope.assertElderAccess(plan.getElderId());
-            Map<String,MedicationExecution> executions=executionMapper.selectList(new QueryWrapper<MedicationExecution>()
-                .eq("plan_id",plan.getId()).eq("execution_date",requested).last("FOR UPDATE")).stream()
-                .collect(Collectors.toMap(MedicationExecution::getPeriod,e -> e));
-            for(String period:plan.getPeriods().split(",")) {
-                MedicationExecution execution=executions.get(period);
-                if(execution!=null) { medication(plan,execution); if("SKIPPED".equals(execution.getStatus())) count++; }
-                else { store(medicationKey(plan.getId(),requested,period),plan.getElderId(),plan.getId(),"MEDICATION_UNRECORDED",
-                    period+"："+plan.getMedicineName()+" 缺少执行登记，需人工核对，不能据此认定漏服。",requested,"/ai-care/medication"); count++; }
-            }
+            count+=scanPlanEvidence(plan,requested);
         }
         audit.record("护理告警","核对历史用药","ai_care_alert",null,"待核对项="+count);
         return Result.success("历史用药核对完成",count);
+    }
+
+    // Internal evidence generation only: callers hold the plan row lock and their own transaction.
+    // The background worker checks current residence itself; this method never grants HTTP access.
+    int scanPlanEvidence(MedicationPlan plan,Date requested) {
+        Map<String,MedicationExecution> executions=executionMapper.selectList(new QueryWrapper<MedicationExecution>()
+            .eq("plan_id",plan.getId()).eq("execution_date",requested).last("FOR UPDATE")).stream()
+            .collect(Collectors.toMap(MedicationExecution::getPeriod,e -> e));
+        int count=0;
+        for(String period:plan.getPeriods().split(",")) {
+            MedicationExecution execution=executions.get(period);
+            if(execution!=null) { medicationEvidence(plan,execution); if("SKIPPED".equals(execution.getStatus())) count++; }
+            else { store(medicationKey(plan.getId(),requested,period),plan.getElderId(),plan.getId(),"MEDICATION_UNRECORDED",
+                period+"："+plan.getMedicineName()+" 缺少执行登记，需人工核对，不能据此认定漏服。",requested,"/ai-care/medication"); count++; }
+        }
+        return count;
     }
 
     public Result list(String state) {
@@ -113,18 +125,25 @@ public class CareAlertService {
         alert.setSourceId(sourceId); alert.setKind(kind); alert.setDetail(detail); alert.setEvidenceKey(hash(kind+"\n"+detail));
         CareAlert previous=alertMapper.selectOne(new QueryWrapper<CareAlert>().eq("alert_key",key));
         if(previous!=null) alert.setTaskKey(previous.getTaskKey());
-        if(previous==null || !alert.getEvidenceKey().equals(previous.getEvidenceKey())) {
-            DailyTask previousTask=taskMapper.selectOne(new QueryWrapper<DailyTask>().eq("task_key",alert.getTaskKey()));
-            if(previousTask!=null && "DONE".equals(previousTask.getState())) alert.setTaskKey(key+"-"+alert.getEvidenceKey().substring(0,12));
+        boolean changed=previous==null || !alert.getEvidenceKey().equals(previous.getEvidenceKey());
+        DailyTask previousTask=taskMapper.selectOne(new QueryWrapper<DailyTask>().eq("task_key",alert.getTaskKey()));
+        if(previousTask!=null) previousTask=taskMapper.lockById(previousTask.getId());
+        if(changed) {
+            if(previousTask!=null && "DONE".equals(previousTask.getState())) alert.setTaskKey(key+"-notice-"+(previous==null ? 1L : previous.getNoticeRevision()+1L));
         }
         alertMapper.upsertEvidence(alert);
         DailyTask task=new DailyTask(); task.setTaskKey(alert.getTaskKey()); task.setTaskDate(day(time)); task.setElderId(elderId); task.setSourceId(sourceId);
         task.setCategory(kind); task.setTitle("HEALTH_CHANGE".equals(kind)?"健康数据变化复核":"用药记录待核对");
         task.setDetail(detail); task.setTargetPath(path); task.setDueAt(new Date(time.getTime()+86400000L));
+        // A periodic rescan must not invalidate an owner's unchanged review form.
+        if(!changed && previousTask!=null && ("DONE".equals(previousTask.getState())
+            || (Objects.equals(previousTask.getCategory(),task.getCategory())
+                && Objects.equals(previousTask.getTitle(),task.getTitle())
+                && Objects.equals(previousTask.getDetail(),task.getDetail())))) return;
         taskMapper.upsertSnapshot(task);
     }
-    private String medicationKey(Long id,Date date,String period) { return new SimpleDateFormat("yyyy-MM-dd").format(date)+"-med-"+id+"-"+period; }
-    private Date day(Date date) { Calendar c=Calendar.getInstance(); c.setTime(date); c.set(Calendar.HOUR_OF_DAY,0); c.set(Calendar.MINUTE,0); c.set(Calendar.SECOND,0); c.set(Calendar.MILLISECOND,0); return c.getTime(); }
+    private String medicationKey(Long id,Date date,String period) { return java.time.Instant.ofEpochMilli(date.getTime()).atZone(ZoneId.of("Asia/Shanghai")).toLocalDate()+"-med-"+id+"-"+period; }
+    private Date day(Date date) { return Date.from(java.time.Instant.ofEpochMilli(date.getTime()).atZone(ZoneId.of("Asia/Shanghai")).toLocalDate().atStartOfDay(ZoneId.of("Asia/Shanghai")).toInstant()); }
     private String hash(String value) {
         try { byte[] bytes=MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)); StringBuilder s=new StringBuilder(); for(byte b:bytes)s.append(String.format("%02x",b&255));return s.toString(); }
         catch(Exception e) { throw new IllegalStateException("告警证据摘要不可用",e); }

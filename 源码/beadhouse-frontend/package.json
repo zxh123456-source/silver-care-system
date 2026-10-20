@@ -8,6 +8,7 @@
     "test:recharge": "node --test scripts/recharge-contract.test.cjs",
     "test:resources": "node --test scripts/auth-resource-contract.test.cjs",
     "test:bed": "node --test scripts/bed-contract.test.cjs",
+    "test:notifications": "node --test scripts/alert-notification-contract.test.cjs",
     "lint": "vue-cli-service lint",
     "prettier": "prettier --write ."
   },

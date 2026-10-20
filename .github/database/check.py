@@ -29,6 +29,27 @@ def require(condition, message):
         raise AssertionError(message)
 
 
+def read_baseline_manifest():
+    entries = []
+    for line in (ROOT / "数据库/migrations.tsv").read_text(encoding="utf-8").splitlines():
+        if not line or line.startswith("#"):
+            continue
+        fields = line.split("\t")
+        require(len(fields) == 4, "Baseline migration manifest must have four columns")
+        require(fields[0] == f"{len(entries) + 1:04d}",
+                "Baseline migration versions must be ordered and contiguous from 0001")
+        entries.append(tuple(fields))
+    require(len(entries) >= 3, "The gate requires baseline history with an intermediate version")
+    require(len(entries) + 4 < 9999, "Fault versions would collide with the unknown-history fixture")
+    return tuple(entries)
+
+
+BASELINE = read_baseline_manifest()
+BASE_COUNT = len(BASELINE)
+LAST_VERSION = BASELINE[-1][0]
+BASE_VERSIONS = [entry[0] for entry in BASELINE]
+
+
 def docker_executable():
     explicit = os.environ.get("SILVERCARE_DOCKER") or os.environ.get("DOCKER_EXECUTABLE")
     candidates = [explicit, shutil.which("docker")]
@@ -278,13 +299,18 @@ def exercise(gate, package):
             "Inspect wrote tables to an empty database")
     gate.migrate(cid, "initialize")
     initial_history = history(gate, cid)
-    require(len(initial_history.splitlines()) == 6, "Fresh initialization did not apply six versions")
+    require(len(initial_history.splitlines()) == BASE_COUNT,
+            f"Fresh initialization did not apply all {BASE_COUNT} baseline versions")
     require(all(line.endswith("|SUCCEEDED") for line in initial_history.splitlines()),
             "Fresh initialization contains a non-applied migration")
+    require(initial_history.splitlines() == [
+        "|".join((version, filename, checksum, "SUCCEEDED"))
+        for version, filename, checksum, _ in BASELINE
+    ], "Fresh initialization history does not exactly match the complete baseline manifest")
     initial_business = business_snapshot(gate, cid)
     initial_metadata = gate.scalar(cid, "SELECT origin FROM db_beadhouse.schema_metadata")
     require(initial_metadata == "DEMO_SEEDED", "Fresh origin is not explicitly recorded")
-    gate.check("empty server initializes six tracked migrations")
+    gate.check(f"empty server initializes all {BASE_COUNT} tracked baseline migrations")
 
     before = gate.snapshot(cid)
     gate.migrate(cid, "upgrade")
@@ -325,15 +351,18 @@ def exercise(gate, package):
         "exec", cid, "cat", rescue + "/manifest.json").stdout)
     require(rescue_manifest["source_readiness"] == "NOT_READY",
             "Rescue backup concealed incompatible applied history")
-    require(len(rescue_manifest["migrations"]) == 6, "Rescue backup omitted actual version history")
+    require(len(rescue_manifest["migrations"]) == BASE_COUNT,
+            "Rescue backup omitted actual version history")
+    require(sorted(item["version"] for item in rescue_manifest["migrations"]) == BASE_VERSIONS,
+            "Rescue backup did not preserve every baseline version")
     require(gate.snapshot(cid) == before, "Rescue backup modified incompatible source history")
     gate.check("an incompatible schema remains recoverably backed up with explicit NOT_READY metadata")
 
-    gate.mysql(cid, "UPDATE db_beadhouse.schema_migration SET version='9999' WHERE version='0006'")
+    gate.mysql(cid, f"UPDATE db_beadhouse.schema_migration SET version='9999' WHERE version='{LAST_VERSION}'")
     unknown = gate.snapshot(cid)
     failure(gate.migrate(cid, "upgrade", expected=None), "Unknown historical version was accepted")
     require(gate.snapshot(cid) == unknown, "Unknown history rejection mutated the database")
-    gate.mysql(cid, "UPDATE db_beadhouse.schema_migration SET version='0006' WHERE version='9999'")
+    gate.mysql(cid, f"UPDATE db_beadhouse.schema_migration SET version='{LAST_VERSION}' WHERE version='9999'")
     gate.mysql(cid, "CREATE TABLE db_beadhouse.gate_history_copy LIKE db_beadhouse.schema_migration;"
                     "INSERT INTO db_beadhouse.gate_history_copy SELECT * FROM db_beadhouse.schema_migration;"
                     "DELETE FROM db_beadhouse.schema_migration WHERE version='0003';")
@@ -362,9 +391,10 @@ def exercise(gate, package):
 
 
 def fault_checks(gate, cid, package, directory):
+    failed_version, successor_version, interrupted_version, large_version = range(BASE_COUNT + 1, BASE_COUNT + 5)
     gate.mysql(cid, "CREATE TABLE db_beadhouse.gate_fault_control(allowed BOOLEAN NOT NULL);"
                     "INSERT INTO db_beadhouse.gate_fault_control VALUES (FALSE);")
-    append_migration(package, 7, """USE db_beadhouse;
+    append_migration(package, failed_version, f"""USE db_beadhouse;
 CREATE TABLE IF NOT EXISTS gate_ddl_survives(id BIGINT PRIMARY KEY);
 DROP PROCEDURE IF EXISTS gate_controlled_failure;
 DELIMITER $$
@@ -377,16 +407,16 @@ END$$
 DELIMITER ;
 CALL gate_controlled_failure();
 DROP PROCEDURE gate_controlled_failure;
-INSERT IGNORE INTO gate_ddl_survives VALUES (7);
+INSERT IGNORE INTO gate_ddl_survives VALUES ({failed_version});
 """)
-    append_migration(package, 8, """USE db_beadhouse;
+    append_migration(package, successor_version, f"""USE db_beadhouse;
 CREATE TABLE IF NOT EXISTS gate_after_failure(id BIGINT PRIMARY KEY);
-INSERT IGNORE INTO gate_after_failure VALUES (8);
+INSERT IGNORE INTO gate_after_failure VALUES ({successor_version});
 """)
     # Copy individual package contents rather than nesting a second directory.
     gate.docker_run("cp", str(package) + "/.", f"{cid}:{directory}")
     failure(gate.migrate(cid, "upgrade", expected=None), "DDL followed by SIGNAL reported success")
-    require(status(gate, cid, 7) in ("FAILED", "INTERRUPTED"), "Failed migration was not recorded")
+    require(status(gate, cid, failed_version) in ("FAILED", "INTERRUPTED"), "Failed migration was not recorded")
     require(gate.scalar(cid, "SELECT COUNT(*) FROM information_schema.tables WHERE "
                         "table_schema='db_beadhouse' AND table_name='gate_ddl_survives'") == "1",
             "The test did not exercise a committed DDL before failure")
@@ -400,16 +430,16 @@ INSERT IGNORE INTO gate_after_failure VALUES (8);
     require(gate.snapshot(cid) == before, "Implicit retry modified a failed migration")
     gate.mysql(cid, "UPDATE db_beadhouse.gate_fault_control SET allowed=TRUE")
     gate.migrate(cid, "upgrade", "--retry")
-    require(status(gate, cid, 7) == "SUCCEEDED" and status(gate, cid, 8) == "SUCCEEDED",
+    require(status(gate, cid, failed_version) == "SUCCEEDED" and status(gate, cid, successor_version) == "SUCCEEDED",
             "Explicit retry did not apply the repaired same-checksum migration and successor")
     require(gate.scalar(cid, "SELECT attempts FROM db_beadhouse.schema_migration "
-                        "WHERE version='0007'") == "2", "Retry attempt count is inaccurate")
+                        f"WHERE version='{failed_version:04d}'") == "2", "Retry attempt count is inaccurate")
     gate.check("DDL failure remains visible, blocks later versions, and requires explicit same-hash retry")
 
-    append_migration(package, 9, """USE db_beadhouse;
+    append_migration(package, interrupted_version, f"""USE db_beadhouse;
 CREATE TABLE IF NOT EXISTS gate_interrupted(id BIGINT PRIMARY KEY);
 SELECT IF((SELECT allowed FROM gate_fault_control LIMIT 1),0,SLEEP(60)) /* migration_gate_crash */;
-INSERT IGNORE INTO gate_interrupted VALUES (9);
+INSERT IGNORE INTO gate_interrupted VALUES ({interrupted_version});
 """)
     gate.mysql(cid, "UPDATE db_beadhouse.gate_fault_control SET allowed=FALSE")
     gate.docker_run("cp", str(package) + "/.", f"{cid}:{directory}")
@@ -430,7 +460,7 @@ INSERT IGNORE INTO gate_interrupted VALUES (9);
                 break
             time.sleep(0.2)
         require(connection is not None, "Interruption fixture never reached its SQL execution barrier")
-        require(status(gate, cid, 9) == "RUNNING", "Active migration was not durably RUNNING")
+        require(status(gate, cid, interrupted_version) == "RUNNING", "Active migration was not durably RUNNING")
         runner_pid = gate.docker_run("exec", cid, "cat", "/tmp/gate-runner.pid").stdout.decode().strip()
         require(runner_pid.isdecimal() and int(runner_pid) > 1, "Invalid owned runner PID")
         gate.docker_run("exec", cid, "bash", "-c", 'kill -9 "$1"', "gate", runner_pid)
@@ -441,16 +471,16 @@ INSERT IGNORE INTO gate_interrupted VALUES (9);
             process.kill()
             process.wait(timeout=10)
         output.close()
-    require(status(gate, cid, 9) == "RUNNING", "Crash unexpectedly claimed an orderly migration outcome")
+    require(status(gate, cid, interrupted_version) == "RUNNING", "Crash unexpectedly claimed an orderly migration outcome")
     before = gate.snapshot(cid)
     failure(gate.migrate(cid, "inspect", expected=None), "Interrupted migration was reported as ready")
     require(gate.snapshot(cid) == before, "Inspect rewrote crash recovery state")
     failure(gate.migrate(cid, "upgrade", "--retry", expected=None),
             "First encounter silently retried a crashed RUNNING migration")
-    require(status(gate, cid, 9) == "INTERRUPTED", "Crashed RUNNING migration was not classified INTERRUPTED")
+    require(status(gate, cid, interrupted_version) == "INTERRUPTED", "Crashed RUNNING migration was not classified INTERRUPTED")
     gate.mysql(cid, "UPDATE db_beadhouse.gate_fault_control SET allowed=TRUE")
     gate.migrate(cid, "upgrade", "--retry")
-    require(status(gate, cid, 9) == "SUCCEEDED", "Explicit recovery did not finish interrupted migration")
+    require(status(gate, cid, interrupted_version) == "SUCCEEDED", "Explicit recovery did not finish interrupted migration")
     before = gate.snapshot(cid)
     gate.owned(cid)
     gate.docker_run("restart", cid)
@@ -458,12 +488,12 @@ INSERT IGNORE INTO gate_interrupted VALUES (9);
     gate.migrate(cid, "inspect")
     require(gate.snapshot(cid) == before, "Restart lost migration history or business data")
     gate.check("a killed SQL session leaves recoverable state and the repaired database survives restart")
-    append_migration(package, 10, "USE db_beadhouse;\nSELECT REPEAT('x',131072);\n-- "
+    append_migration(package, large_version, "USE db_beadhouse;\nSELECT REPEAT('x',131072);\n-- "
                      + ("large migration input " * 16000)
                      + "\nCREATE TABLE gate_large_stream(id BIGINT PRIMARY KEY);\n")
     gate.docker_run("cp", str(package) + "/.", f"{cid}:{directory}")
     gate.migrate(cid, "upgrade")
-    require(status(gate, cid, 10) == "SUCCEEDED",
+    require(status(gate, cid, large_version) == "SUCCEEDED",
             "Large migration input and output did not complete")
     require(gate.scalar(cid, "SELECT COUNT(*) FROM information_schema.tables WHERE "
                         "table_schema='db_beadhouse' AND table_name='gate_large_stream'") == "1",
@@ -503,7 +533,7 @@ INSERT INTO gate_backup_probe VALUES (1,-5);
     result = json.loads(restored.stdout.decode("utf-8").splitlines()[-1])
     require(result["status"] == "verified", "Restore drill did not verify the recovered database")
     require(int(result["tables"]) == len(before), "Restore did not verify every source table")
-    require(int(result["migrations"]) == 6, "Restore did not verify all applied migrations")
+    require(int(result["migrations"]) == BASE_COUNT, "Restore did not verify all applied migrations")
     require(all(int(result["objects"][kind]) >= 1 for kind in ("routines", "events", "triggers")),
             "Restore did not verify the stored procedure, disabled event and trigger")
     require(gate.snapshot(cid) == before, "Restore drill modified the source")

@@ -146,6 +146,22 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
                 expect(admin.get_by_role("button", name="登录", exact=True)).not_to_have_class(re.compile(r"\bis-loading\b"))
                 record("incorrect credentials return 401 and login remains usable")
                 login(admin, "13547584400")
+                # No scan request: the production scheduler must recover yesterday's missing record.
+                route(admin, "/ai-care/daily", "每日护理助手")
+                notices = admin.locator(".notification-center")
+                automatic = notices.locator(".el-table__body tbody tr").filter(has_text="E2E自动核对计划")
+                expect(automatic).to_have_count(1, timeout=30000)
+                expect(admin.locator(".care-notification-button .el-badge__content")).to_have_text("1")
+                expect(automatic).to_contain_text("不能据此认定漏服")
+                click_api(admin, automatic.get_by_role("button", name="标记已读", exact=True), "/api/ai/daily/notifications/read")
+                expect(automatic).to_have_count(0)
+                expect(admin.locator(".care-notification-button .el-badge__content")).not_to_be_visible()
+                automatic_alert = admin.locator(".task-center:not(.notification-center)").first.locator(".el-table__body tbody tr").filter(has_text="E2E自动核对计划")
+                expect(automatic_alert).to_contain_text("待确认")
+                route(admin, "/ai-care/daily", "每日护理助手")
+                expect(automatic).to_have_count(0)
+                expect(automatic_alert).to_contain_text("待确认")
+                record("startup compensation produces an unread notice and personal read persists without acknowledging it")
                 admin.goto(origin + "/#/people/staff")
                 employee = admin.locator(".el-table__body tbody tr").filter(has_text="E2E护工")
                 expect(employee).to_have_count(1)
@@ -490,17 +506,24 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
                     temperature.fill(value)
                     click_api(staff, staff.get_by_role("button", name="保存测量"), "/api/ai/health/measurement")
                 route(staff, "/ai-care/daily", "每日护理助手")
-                alert = staff.locator(".task-center").first.locator(".el-table__body tbody tr").filter(has_text="健康变化").first
+                personal_notices = staff.locator(".notification-center")
+                expect(personal_notices).not_to_contain_text("E2E自动核对计划")
+                health_notice = personal_notices.locator(".el-table__body tbody tr").filter(has_text="健康变化").first
+                expect(health_notice).to_be_visible()
+                click_api(staff, health_notice.get_by_role("button", name="标记已读", exact=True), "/api/ai/daily/notifications/read")
+                expect(personal_notices.locator(".el-table__body tbody tr").filter(has_text="健康变化")).to_have_count(0)
+                record("staff notices follow elder scope and reading preserves the open health alert")
+                alert = staff.locator(".task-center:not(.notification-center)").first.locator(".el-table__body tbody tr").filter(has_text="健康变化").first
                 click_api(staff, alert.get_by_role("button", name="确认", exact=True), "/api/ai/daily/alerts/ack")
                 alert.get_by_role("button", name="解除", exact=True).click()
                 click_api(staff, prompt(staff, "E2E测量复核"), "/api/ai/daily/alerts/resolve")
-                select_option(staff, staff.locator(".task-center").first.locator(".el-select"), "已解除")
-                expect(staff.locator(".task-center").first).to_contain_text("E2E测量复核")
+                select_option(staff, staff.locator(".task-center:not(.notification-center)").first.locator(".el-select"), "已解除")
+                expect(staff.locator(".task-center:not(.notification-center)").first).to_contain_text("E2E测量复核")
                 record("health measurements and persisted alert acknowledgement/resolution")
 
                 synced = click_api(staff, staff.get_by_role("button", name="全量同步所选日期事项"), "/api/ai/daily/tasks/sync")
                 assert synced["data"] >= 201
-                tasks = staff.locator(".task-center").nth(1)
+                tasks = staff.locator(".task-center:not(.notification-center)").nth(1)
                 expect(tasks.locator(".el-table__body tbody tr")).to_have_count(200)
                 task = tasks.locator(".el-table__body tbody tr").filter(has_text="E2E交接任务")
                 click_api(staff, task.get_by_role("button", name="认领", exact=True), "/api/ai/daily/tasks/claim")
@@ -511,7 +534,7 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
                 record("full source sync above 200, task claim and transfer")
 
                 route(admin, "/ai-care/daily", "每日护理助手")
-                tasks = admin.locator(".task-center").nth(1)
+                tasks = admin.locator(".task-center:not(.notification-center)").nth(1)
                 task = tasks.locator(".el-table__body tbody tr").filter(has_text="E2E交接任务")
                 expect(task).to_contain_text("超管")
                 task.get_by_role("button", name="复核完成").click()
@@ -535,7 +558,7 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
                 med.get_by_role("button", name="未执行", exact=True).click()
                 click_api(staff, prompt(staff, "E2E测试未执行原因"), "/api/ai/medication/execute")
                 route(staff, "/ai-care/daily", "每日护理助手")
-                alerts = staff.locator(".task-center").first
+                alerts = staff.locator(".task-center:not(.notification-center)").first
                 expect(alerts).to_contain_text("E2E测试计划")
                 expect(alerts).to_contain_text("已登记未执行")
                 record("medication plan and skipped execution persist as alert")
@@ -544,7 +567,7 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
                 click_api(staff, staff.locator(".el-table__body tbody tr").filter(
                     has_text="E2E测试计划").get_by_role("button", name="已执行", exact=True), "/api/ai/medication/execute")
                 route(staff, "/ai-care/daily", "每日护理助手")
-                expect(staff.locator(".task-center").first).not_to_contain_text("E2E测试计划")
+                expect(staff.locator(".task-center:not(.notification-center)").first).not_to_contain_text("E2E测试计划")
                 record("completed medication execution resolves its alert")
 
                 route(staff, "/ai-care/health", "健康趋势观察")
