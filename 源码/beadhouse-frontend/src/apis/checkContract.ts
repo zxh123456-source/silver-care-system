@@ -1,6 +1,6 @@
 import { http } from "@/utils";
 import { IPageSearchElderByKey } from "@/apis/bookManage";
-import { resourceSessionConfig } from "@/utils/authResource";
+import { captureResourceSession, checkedResourceSessionConfig, resourceSessionConfig } from "@/utils/authResource";
 import type { ResourceSession } from "@/utils/authResource";
 
 interface IPageCheckContractByKey {
@@ -49,8 +49,8 @@ export async function pageCheckContractByKey(data: IPageCheckContractByKey) {
 }
 
 // 分页搜索老人
-export async function pageSearchElderByKey(data: IPageSearchElderByKey) {
-  return http.get("/api/checkContract/pageSearchElderByKey", {
+export function pageSearchElderByKey(data: IPageSearchElderByKey, session: ResourceSession = captureResourceSession()) {
+  return http.get("/api/checkContract/pageSearchElderByKey", { ...checkedResourceSessionConfig(session),
     params: {
       ...data
     }

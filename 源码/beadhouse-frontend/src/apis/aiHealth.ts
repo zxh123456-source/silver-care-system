@@ -1,3 +1,5 @@
+import type { ResourceSession } from "@/utils/authResource";
+import { captureResourceSession, checkedResourceSessionConfig } from "@/utils/authResource";
 import { http } from "@/utils";
 
 export interface HealthMeasurement {
@@ -22,6 +24,6 @@ export function getHealthTrend(elderId: number, limit = 30) {
   return http.get("/api/ai/health/trend", { params: { elderId, limit } });
 }
 
-export function pageSearchHealthElder(data: { pageNum: number; pageSize: number; name?: string; phone?: string }) {
-  return http.get("/api/ai/health/elders", { params: data });
+export function pageSearchHealthElder(data: { pageNum: number; pageSize: number; name?: string; phone?: string }, session: ResourceSession = captureResourceSession()) {
+  return http.get("/api/ai/health/elders", { ...checkedResourceSessionConfig(session), params: data });
 }

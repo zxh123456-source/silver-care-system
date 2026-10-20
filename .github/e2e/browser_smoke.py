@@ -9,6 +9,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import urllib.parse
 import zipfile
 from datetime import datetime, timedelta
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -59,11 +60,16 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
     thread.start()
     origin = f"http://127.0.0.1:{server.server_port}"
     checks, errors, contexts = [], [], []
+    expected_console_errors = []
+    expired_contexts, revoked_contexts = set(), set()
     failed = True
     try:
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
             try:
+                def allow_console_once(label, path_pattern, message_pattern):
+                    expected_console_errors.append((label, path_pattern, message_pattern))
+
                 def new_page(label):
                     context = browser.new_context(viewport={"width": 1600, "height": 1000}, timezone_id="Asia/Shanghai")
                     contexts.append((label, context))
@@ -77,6 +83,28 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
                     page = context.new_page()
                     page.set_default_timeout(30000)
                     page.on("pageerror", lambda error: errors.append(f"{label}: {error}"))
+                    def console_error(message):
+                        if message.type != "error":
+                            return
+                        text = message.text
+                        path = urllib.parse.urlparse(message.location.get("url", "")).path
+                        for index, (expected_label, expected_path, expected_message) in enumerate(expected_console_errors):
+                            if label == expected_label and re.fullmatch(expected_path, path) and re.fullmatch(expected_message, text):
+                                expected_console_errors.pop(index)
+                                return
+                        expected_auth_paths = {
+                            "/api/account/login", "/api/ai/daily/tasks", "/api/ai/daily/alerts",
+                            "/api/ai/daily/notifications", "/api/ai/daily/notification-count",
+                            "/api/ai/daily/scan-status", "/api/ai/daily/overview", "/api/ai/scope/elders",
+                        }
+                        if re.fullmatch(r"Failed to load resource: the server responded with a status of 401 \(.*\)", text):
+                            if path == "/api/account/login" or (label in expired_contexts and
+                                    (path in expected_auth_paths or re.fullmatch(r"/api/file/[0-9]+/content", path))):
+                                return
+                        if label in revoked_contexts and re.fullmatch(r"Failed to load resource: the server responded with a status of 403 \(.*\)", text) and path == "/api/ai/health/measurement":
+                            return
+                        errors.append(f"{label} console.error: {text}")
+                    page.on("console", console_error)
                     return page
 
                 def record(name):
@@ -92,12 +120,12 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
                     assert data.get("code") == 200, (endpoint, data.get("code"), data.get("msg"))
                     return data
 
-                def login(page, account):
+                def login(page, account, credential=None):
                     page.goto(origin + "/#/login")
                     # Element Plus loading buttons can have no disabled attribute while clicks are ignored.
                     expect(page.get_by_role("button", name="登录", exact=True)).not_to_have_class(re.compile(r"\bis-loading\b"))
                     page.get_by_placeholder("账号", exact=True).fill(account)
-                    page.get_by_placeholder("密码", exact=True).fill(password)
+                    page.get_by_placeholder("密码", exact=True).fill(password if credential is None else credential)
                     code = page.evaluate('window.captchaDigits.slice(-4).join("")')
                     assert len(code) == 4
                     page.get_by_placeholder("验证码", exact=True).fill(code)
@@ -146,6 +174,29 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
                 expect(admin.get_by_role("button", name="登录", exact=True)).not_to_have_class(re.compile(r"\bis-loading\b"))
                 record("incorrect credentials return 401 and login remains usable")
                 login(admin, "13547584400")
+                expect(admin.locator("#myEcharts canvas")).to_have_count(1)
+                home_hash = admin.evaluate("window.location.hash")
+                route(admin, "/ai-care/daily", "每日护理助手")
+                held_trends = []
+                def hold_trend(request_route):
+                    held_trends.append((request_route, request_route.fetch()))
+                admin.route("**/api/home/businessTrend", hold_trend)
+                admin.evaluate("hash => { window.location.hash = hash }", home_hash)
+                expect(admin.locator("#myEcharts")).to_be_visible()
+                deadline = time.monotonic() + 10
+                while not held_trends and time.monotonic() < deadline:
+                    admin.wait_for_timeout(20)
+                assert len(held_trends) == 1
+                admin.evaluate("window.location.hash = '#/ai-care/daily'")
+                expect(admin.get_by_role("heading", name="每日护理助手", exact=True)).to_be_visible()
+                for request_route, response in held_trends:
+                    request_route.fulfill(response=response)
+                admin.unroute("**/api/home/businessTrend", hold_trend)
+                admin.wait_for_timeout(150)
+                assert not errors, errors
+                admin.evaluate("hash => { window.location.hash = hash }", home_hash)
+                expect(admin.locator("#myEcharts canvas")).to_have_count(1)
+                record("a delayed real trend response cannot touch an unmounted chart and home can remount")
                 # No scan request: the production scheduler must recover yesterday's missing record.
                 route(admin, "/ai-care/daily", "每日护理助手")
                 notices = admin.locator(".notification-center")
@@ -165,6 +216,8 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
                 admin.goto(origin + "/#/people/staff")
                 employee = admin.locator(".el-table__body tbody tr").filter(has_text="E2E护工")
                 expect(employee).to_have_count(1)
+                # The original seed avatar is an intentionally unresolved legacy reference.
+                allow_console_once("admin", r"/api/file/resolve", r"Failed to load resource: the server responded with a status of 403 \(.*\)")
                 employee.get_by_role("button", name="编辑", exact=True).click()
                 editor = admin.get_by_role("dialog", name="编辑", exact=True)
                 expect(editor).to_be_visible()
@@ -186,6 +239,8 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
                 assert fetched[-1].request.headers.get("token")
                 assert "token=" not in fetched[-1].url and "no-store" in fetched[-1].headers.get("cache-control", "")
                 assert admin.request.get(origin + image_url).status == 401
+                # Element Plus reports this known before-upload validation rejection itself.
+                allow_console_once("admin", r"/js/chunk-vendors\.[^/]+\.js", r"Error: 图片内容无效(?:\n[^\n]*)+")
                 with admin.expect_response(lambda response: "/api/file/uploadImg" in response.url) as invalid_image:
                     editor.locator("input[type=file]").set_input_files({"name": "forged.png", "mimeType": "image/png", "buffer": b"<html>not a picture</html>"})
                 assert invalid_image.value.json()["code"] == 400
@@ -373,6 +428,7 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
                     receipt = committed.json()
                     assert committed.status == 200 and receipt["code"] == 200, receipt
                     lost_receipts.append(receipt["data"])
+                    allow_console_once("admin", r"/api/depositRecharge/recharge", r"Failed to load resource: net::ERR_FAILED")
                     intercept.abort("failed")
 
                 recharge_pattern = "**/api/depositRecharge/recharge"
@@ -579,6 +635,7 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
                 row.get_by_role("button", name="撤销", exact=True).click()
                 click_api(admin, admin.locator(".el-message-box").get_by_role("button", name="确定", exact=True),
                           "/api/ai/scope/assignment", method="DELETE")
+                revoked_contexts.add("staff")
                 with staff.expect_response(lambda response: "/api/ai/health/measurement" in response.url
                                            and response.request.method == "POST") as forbidden:
                     staff.get_by_role("button", name="保存测量").click()
@@ -593,6 +650,7 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
                 expect(staff.get_by_role("dialog", name="选择老人").locator(".el-table__body tbody tr")).to_have_count(0)
                 record("elder permission revocation takes effect without relogin")
                 # Revoke the actual Redis session while retaining browser state to exercise the shared 401 handler.
+                expired_contexts.add("staff")
                 logged_out = staff.evaluate('''async () => {
                     const token=JSON.parse(localStorage.getItem("stateData")).app.token;
                     const response=await fetch("/api/account/logout",{method:"DELETE",headers:{token}});
@@ -603,10 +661,99 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
                 staff.wait_for_url(lambda url: "/login" in url)
                 assert not staff.evaluate('JSON.parse(localStorage.getItem("stateData") || "null")?.app?.token')
                 record("expired session redirects to login and clears browser credentials")
+
+                def open_password():
+                    admin.locator(".nav-right .el-dropdown").click()
+                    admin.get_by_role("menuitem", name="修改密码", exact=True).click()
+                    result = admin.get_by_role("dialog", name="修改密码", exact=True)
+                    expect(result).to_be_visible()
+                    return result
+
+                password_requests = []
+                admin.on("request", lambda request: password_requests.append(request)
+                         if request.url.endswith("/api/account/edit") else None)
+                change = open_password()
+                for placeholder in ("旧密码", "新密码", "确认密码"):
+                    expect(change.get_by_placeholder(placeholder, exact=True)).to_have_value("")
+                next_password = "  e2e-password-new-20261020  "
+                change.get_by_placeholder("旧密码", exact=True).fill(password)
+                change.get_by_placeholder("新密码", exact=True).fill(next_password)
+                change.get_by_placeholder("确认密码", exact=True).fill(next_password)
+                old_submit = change.get_by_role("button", name="修改", exact=True).element_handle()
+                assert old_submit is not None
+                other_tab = admin.context.new_page()
+                try:
+                    login(other_tab, "18428167423")
+                    # Exercise a click already queued against the previous account's dialog.
+                    old_submit.dispatch_event("click")
+                    admin.wait_for_timeout(100)
+                    assert not password_requests
+                    expect(change).not_to_be_visible()
+                    login(other_tab, "13547584400")
+                finally:
+                    other_tab.close()
+                admin.goto(f"{origin}/?password-reset={time.monotonic_ns()}{home_hash}")
+                expect(admin.locator("#myEcharts canvas")).to_have_count(1)
+                record("switching accounts in another tab prevents the old password dialog from sending")
+
+                change = open_password()
+                change.get_by_placeholder("旧密码", exact=True).fill("incorrect-test-old-password")
+                change.get_by_placeholder("新密码", exact=True).fill(next_password)
+                change.get_by_placeholder("确认密码", exact=True).fill(next_password)
+                with admin.expect_response(lambda response: response.url.endswith("/api/account/edit")) as bad_password:
+                    change.get_by_role("button", name="修改", exact=True).click()
+                assert bad_password.value.json()["code"] == 400
+                expect(change).to_be_visible()
+                expect(change.get_by_placeholder("新密码", exact=True)).to_have_value(next_password)
+                expect(change.get_by_role("button", name="修改", exact=True)).not_to_have_class(re.compile(r"\bis-loading\b"))
+                change.get_by_placeholder("旧密码", exact=True).fill(password)
+                def temporary_password_failure(request_route):
+                    request_route.fulfill(status=200, content_type="application/json",
+                                          body=json.dumps(dict(code=503, msg="E2E临时错误，请重试", data=None)))
+                admin.route("**/api/account/edit", temporary_password_failure)
+                change.get_by_role("button", name="修改", exact=True).click()
+                expect(admin.get_by_text("E2E临时错误，请重试", exact=True).first).to_be_visible()
+                expect(change.get_by_role("button", name="修改", exact=True)).not_to_have_class(re.compile(r"\bis-loading\b"))
+                expect(change.get_by_placeholder("新密码", exact=True)).to_have_value(next_password)
+                admin.unroute("**/api/account/edit", temporary_password_failure)
+                record("password validation and a rejected request preserve form input and allow retry")
+
+                held_passwords, logout_requests = [], []
+                admin.on("request", lambda request: logout_requests.append(request)
+                         if request.url.endswith("/api/account/logout") else None)
+                def hold_password_response(request_route):
+                    held_passwords.append((request_route, request_route.fetch()))
+                admin.route("**/api/account/edit", hold_password_response)
+                change.get_by_role("button", name="修改", exact=True).click()
+                deadline = time.monotonic() + 10
+                while not held_passwords and time.monotonic() < deadline:
+                    admin.wait_for_timeout(20)
+                assert len(held_passwords) == 1
+                change.get_by_role("button", name="修改", exact=True).dispatch_event("click")
+                admin.wait_for_timeout(80)
+                assert len(held_passwords) == 1
+                actual = held_passwords[0][0].request.post_data_json
+                assert actual == dict(oldPass=password, newPass=next_password)
+                held_passwords[0][0].fulfill(response=held_passwords[0][1])
+                admin.unroute("**/api/account/edit", hold_password_response)
+                admin.wait_for_url(lambda url: "/login" in url)
+                assert not logout_requests, "successful password rotation already revoked the old token"
+                assert not admin.evaluate('JSON.parse(localStorage.getItem("stateData") || "null")?.app?.token')
+                for rejected_password in (password, next_password.strip()):
+                    expect(admin.get_by_role("button", name="登录", exact=True)).not_to_have_class(re.compile(r"\bis-loading\b"))
+                    admin.get_by_placeholder("账号", exact=True).fill("13547584400")
+                    admin.get_by_placeholder("密码", exact=True).fill(rejected_password)
+                    admin.get_by_placeholder("验证码", exact=True).fill(admin.evaluate('window.captchaDigits.slice(-4).join("")'))
+                    with admin.expect_response(lambda response: response.url.endswith("/api/account/login")) as old_login:
+                        admin.get_by_role("button", name="登录", exact=True).click()
+                    assert old_login.value.status == 401
+                login(admin, "13547584400", next_password)
+                expect(admin.locator("#myEcharts canvas")).to_have_count(1)
+                record("real password change sends the entered values once, exits locally and permits only the exact new password")
                 assert not errors, errors
                 admin.screenshot(path=str(evidence / "admin.png"))
                 staff.screenshot(path=str(evidence / "staff.png"))
-                record("no browser JavaScript exceptions")
+                record("no browser JavaScript or caught Vue console exceptions")
                 failed = False
                 return checks
             finally:

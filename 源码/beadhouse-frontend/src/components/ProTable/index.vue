@@ -46,8 +46,14 @@
           </div>
         </div>
       </div>
+      <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon class="mb-2">
+        <template #default>
+          <el-button size="small" :disabled="loading" @click="getTableList">重新加载</el-button>
+        </template>
+      </el-alert>
       <!-- 表格主体 -->
       <el-table
+        v-loading="loading"
         ref="tableRef"
         v-bind="$attrs"
         :data="tableData"
@@ -178,6 +184,8 @@ const { selectionChange, selectedList, selectedListIds, isSelected } =
 // 表格操作 Hooks
 const {
   tableData,
+  loading,
+  error,
   pageable,
   searchParam,
   searchInitParam,

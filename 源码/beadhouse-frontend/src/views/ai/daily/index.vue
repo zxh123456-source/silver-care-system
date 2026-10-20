@@ -132,6 +132,7 @@ import { computed, onActivated, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { useCareNotifications } from "@/utils/careNotifications";
 import { ElMessage, ElMessageBox } from "element-plus";
+import { isAxiosError } from "axios";
 import { getDailyOverview, listDailyTasks, syncDailyTasks, dailyTaskOwners, actDailyTask, listCareAlerts, scanCareAlerts, actCareAlert } from "@/apis/aiDaily";
 
 const { allowed: notificationsAllowed, unreadCount: notificationCount, items: notifications,
@@ -249,6 +250,13 @@ const filteredItems = computed(() => {
   return items.filter((item: any) => item.category === category.value);
 });
 
+function isExpectedRequestFailure(error: unknown): error is { code?: number; msg?: string } {
+  if (isAxiosError(error)) return true;
+  if (Object.prototype.toString.call(error) !== '[object Object]') return false;
+  const result = error as { code?: number; msg?: string };
+  return Number.isInteger(result.code) && result.code! >= 400 && result.code! <= 599 && typeof result.msg === 'string';
+}
+
 async function load() {
   loading.value = true;
   try {
@@ -256,8 +264,15 @@ async function load() {
     if (res.code !== 200) ElMessage.warning(res.msg); else overview.value = res.data;
     if (taskRes.code !== 200) ElMessage.warning(taskRes.msg); else tasks.value = taskRes.data || [];
     if (alertRes.code !== 200) ElMessage.warning(alertRes.msg); else alerts.value = alertRes.data || [];
-  }
-  finally { loading.value = false; }
+  } catch (error) {
+    if (!isExpectedRequestFailure(error)) throw error;
+    if (error.code === 401 || error.code === 403) {
+      overview.value = null;
+      tasks.value = [];
+      alerts.value = [];
+    }
+    ElMessage.warning(error.msg || '每日事项暂未加载，请稍后刷新重试');
+  } finally { loading.value = false; }
 }
 function go(path: string) { router.push(path); }
 function categoryText(value: string) { return value.startsWith("MEDICATION_") ? "用药" : value === "CARE_FOLLOW_UP" ? "护理" : value === "HEALTH_CHANGE" ? "健康" : "服务预约"; }

@@ -1,6 +1,8 @@
 <template>
   <myCard title="业务趋势" class="w-full">
+    <el-alert v-if="loadError" :title="loadError" type="warning" :closable="false" />
     <div
+      v-show="!loadError"
       id="myEcharts"
       style="width: 1000px; height: 333px"
       ref="Echarts"
@@ -11,53 +13,41 @@
 
 <script lang="ts" setup>
 import * as echarts from 'echarts'
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onBeforeUnmount, ref } from 'vue'
 import { getBusinessTrend } from '@/apis/home'
-let myEcharts = echarts
-let trendData = ref<any[]>([])
-let Echarts = ref()
+
+const trendData = ref<any[]>([])
+const Echarts = ref<HTMLElement | null>(null)
+const loadError = ref('')
+let chart: echarts.ECharts | undefined
+let alive = true
+const resizeChart = () => chart?.resize()
+
 onMounted(async () => {
-  const data: any = await getBusinessTrend()
-  if (data.code === 200 && data.data) {
-    trendData.value = data.data
+  window.addEventListener('resize', resizeChart)
+  try {
+    const response: any = await getBusinessTrend()
+    if (!alive || !Echarts.value) return
+    if (response.code !== 200 || !Array.isArray(response.data)) throw new Error('业务趋势加载失败，请刷新重试')
+    trendData.value = response.data
+    chart = echarts.init(Echarts.value, 'purple-passion')
+    chart.setOption({
+      xAxis: { type: 'category', data: trendData.value.map(item => item.month) },
+      tooltip: { trigger: 'axis' },
+      yAxis: { type: 'value' },
+      series: [{ data: trendData.value.map(item => item.consultNum), type: 'line', smooth: true,
+        label: { show: true, position: 'top', formatter: '{c}' } }]
+    })
+  } catch {
+    if (alive) loadError.value = '业务趋势加载失败，请刷新重试'
   }
-  initChart()
 })
-
-onUnmounted(() => {
-  myEcharts.dispose
+onBeforeUnmount(() => {
+  alive = false
+  window.removeEventListener('resize', resizeChart)
+  chart?.dispose()
+  chart = undefined
 })
-
-function initChart() {
-  let chart = myEcharts.init(Echarts.value, 'purple-passion')
-  chart.setOption({
-    xAxis: {
-      type: 'category',
-      data: trendData.value.map((item: any) => item.month)
-    },
-    tooltip: {
-      trigger: 'axis'
-    },
-    yAxis: {
-      type: 'value'
-    },
-    series: [
-      {
-        data: trendData.value.map((item: any) => item.consultNum),
-        type: 'line',
-        smooth: true,
-        label: {
-          show: true,
-          position: 'top',
-          formatter: '{c}'
-        }
-      }
-    ]
-  })
-  window.onresize = function () {
-    chart.resize()
-  }
-}
 </script>
 
 <style lang="scss" scoped>

@@ -37,6 +37,7 @@ import java.util.stream.Collectors;
 
 @Component
 public class AiDataScopeService {
+    @Resource private ElderPageService elderPages;
     @Resource
     private AuthorityAssert authorityAssert;
     @Resource
@@ -97,19 +98,9 @@ public class AiDataScopeService {
     }
 
     public Result pageAccessibleElders(PageSearchElderByKeyQuery query) {
-        if (query.getPageNum() == null || query.getPageNum() < 1) query.setPageNum(1);
-        if (query.getPageSize() == null || query.getPageSize() < 1) query.setPageSize(10);
-        query.setPageSize(Math.min(query.getPageSize(), 100));
-        List<PageSearchElderByKeyVo> elders = cn.hutool.core.bean.BeanUtil.copyToList(
-                elderMapper.listScopedElders(query.getName(), query.getPhone(),
-                        Arrays.asList(CheckEnum.ENTER.getStatus(), CheckEnum.EXIT_AUDIT.getStatus()), queryStaffId()),
-                PageSearchElderByKeyVo.class);
-        if (!isAdmin()) {
-            Set<Long> allowed = allowedElderIds(elders.stream().map(PageSearchElderByKeyVo::getId).collect(Collectors.toList()));
-            elders = elders.stream().filter(item -> allowed.contains(item.getId())).collect(Collectors.toList());
-        }
-        PageResult<PageSearchElderByKeyVo> result = pageUtil.packPageResultData(elders, query.getPageNum(), query.getPageSize());
-        return Result.success(result);
+        return Result.success(elderPages.selector(query,
+                Arrays.asList(CheckEnum.ENTER.getStatus(),CheckEnum.EXIT_AUDIT.getStatus()),
+                queryStaffId(),false,false));
     }
 
     public Result assignments() {

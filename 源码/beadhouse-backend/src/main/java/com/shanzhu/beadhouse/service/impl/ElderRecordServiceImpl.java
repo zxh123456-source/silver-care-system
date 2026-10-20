@@ -27,6 +27,7 @@ import java.util.List;
 
 @Service
 public class ElderRecordServiceImpl implements ElderRecordService {
+    @Resource private com.shanzhu.beadhouse.service.common.ElderPageService elderPages;
     @Resource
     private com.shanzhu.beadhouse.service.common.AiDataScopeService dataScopeService;
     @Resource
@@ -53,11 +54,7 @@ public class ElderRecordServiceImpl implements ElderRecordService {
 
     @Override
     public Result pageElderByKey(PageElderByKeyQuery query) {
-        // 根据关键字获取长者列表
-        List<PageElderByKeyVo> pageElderByKeyVoList = elderMapper.listElderByKey(query, dataScopeService.queryStaffId());
-        // 封装返回数据
-        PageResult<PageElderByKeyVo> pageResult = pageUtil.packPageResultData(pageElderByKeyVoList, query.getPageNum(), query.getPageSize());
-        return Result.success(pageResult);
+        return Result.success(elderPages.records(query,dataScopeService.queryStaffId()));
     }
 
     @Override

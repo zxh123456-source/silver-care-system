@@ -1,4 +1,4 @@
-import { resourceSessionConfig } from "@/utils/authResource";
+import { captureResourceSession, checkedResourceSessionConfig, resourceSessionConfig } from "@/utils/authResource";
 import type { ResourceSession } from "@/utils/authResource";
 import { http } from '@/utils'
 
@@ -50,8 +50,8 @@ export async function pageReserveByKey(data: ISearchFormReserveByKey) {
 }
 
 // 分页搜索老人
-export function pageSearchElderByKey(data: IPageSearchElderByKey) {
-  return http.get('/api/reserve/pageSearchElderByKey', {
+export function pageSearchElderByKey(data: IPageSearchElderByKey, session: ResourceSession = captureResourceSession()) {
+  return http.get('/api/reserve/pageSearchElderByKey', { ...checkedResourceSessionConfig(session),
     params: {
       ...data
     }

@@ -3,6 +3,8 @@ package com.shanzhu.beadhouse.service.impl;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -12,6 +14,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import java.util.*;
+import java.util.stream.Stream;
 import static org.assertj.core.api.Assertions.*;
 
 @EnabledIfEnvironmentVariable(named="SCOPE_HTTP_REDIS_PORT", matches="[0-9]+")
@@ -103,6 +106,45 @@ class AuthLifecycleHttpIntegrationTest {
             jdbc.update("UPDATE staff SET role_id=? WHERE id=4",role);
             if(priorScopePermission>0) jdbc.update("INSERT INTO role_auth(role_id,auth_id,create_id,create_time,update_id,update_time) VALUES(?,49,1,NOW(),1,NOW())",role);
         }
+    }
+    static Stream<String> invalidNewPasswords() {
+        return Stream.of(null,"short",String.join("",Collections.nCopies(65,"x")),
+                String.join("",Collections.nCopies(25,"汉")));
+    }
+    @ParameterizedTest @MethodSource("invalidNewPasswords")
+    void invalidPasswordCannotReplaceTheHashOrRevokeTheCurrentSession(String invalid) {
+        String pass="auth-password-policy-test-only";
+        String encoded=new BCryptPasswordEncoder().encode(pass);
+        jdbc.update("UPDATE staff SET pass=? WHERE id=4",encoded);
+        String token=login(4,pass,null).path("token").asText();
+        ResponseEntity<JsonNode> response=call(HttpMethod.PUT,"/account/edit",token,map("oldPass",pass,"newPass",invalid));
+        assertThat(response.getBody().path("code").asInt()).isEqualTo(400);
+        assertThat(jdbc.queryForObject("SELECT pass FROM staff WHERE id=4",String.class)).isEqualTo(encoded);
+        assertCode(call(HttpMethod.DELETE,"/account/logout",token,null),200);
+    }
+    @Test void passwordChangePreservesSignificantSpacesAndRevokesThePreviousToken() {
+        String old="auth-password-original-test-only", changed="  auth-password-changed-test-only  ";
+        jdbc.update("UPDATE staff SET pass=? WHERE id=4",new BCryptPasswordEncoder().encode(old));
+        String token=login(4,old,null).path("token").asText();
+        assertCode(call(HttpMethod.PUT,"/account/edit",token,map("oldPass",old,"newPass",changed)),200);
+        assertCode(call(HttpMethod.GET,"/ai/daily/tasks",token,null),401);
+        String phone=jdbc.queryForObject("SELECT phone FROM staff WHERE id=4",String.class);
+        assertCode(call(HttpMethod.POST,"/account/login",null,map("phone",phone,"pass",old)),401);
+        assertCode(call(HttpMethod.POST,"/account/login",null,map("phone",phone,"pass",changed.trim())),401);
+        assertThat(login(4,changed,null).path("token").asText()).isNotBlank();
+    }
+    @Test void wrongOldPasswordAndUnchangedPasswordAreValidationFailuresWithoutRevokingTheSession() {
+        String pass="auth-password-validation-test-only";
+        String encoded=new BCryptPasswordEncoder().encode(pass);
+        jdbc.update("UPDATE staff SET pass=? WHERE id=4",encoded);
+        String token=login(4,pass,null).path("token").asText();
+        for(Map<String,Object> body:Arrays.asList(map("oldPass","incorrect-old-password","newPass",pass+"-new"),
+                map("oldPass",pass,"newPass",pass))) {
+            ResponseEntity<JsonNode> response=call(HttpMethod.PUT,"/account/edit",token,body);
+            assertThat(response.getBody().path("code").asInt()).isEqualTo(400);
+            assertThat(jdbc.queryForObject("SELECT pass FROM staff WHERE id=4",String.class)).isEqualTo(encoded);
+        }
+        assertCode(call(HttpMethod.DELETE,"/account/logout",token,null),200);
     }
     private JsonNode login(int id,String password,String token) {
         String account=jdbc.queryForObject("SELECT phone FROM staff WHERE id=?",String.class,id);

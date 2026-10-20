@@ -129,14 +129,18 @@ public class AccountServiceImpl implements AccountService {
 
     @Override
     public Result edit(EditQuery query) {
+        if (query == null || query.getOldPass() == null || query.getNewPass() == null
+                || query.getNewPass().length() < 8 || query.getNewPass().length() > 64
+                || query.getNewPass().getBytes(StandardCharsets.UTF_8).length > 72)
+            return Result.error(400, "请填写原密码和8至64位新密码（UTF-8不超过72字节）");
         // 获取登录用户信息
         LoginUserVo loginUserInfo = authorityAssert.getLoginUserInfo();
         // 原密码错误
         boolean checkOldPass = passwordEncoder.matches(query.getOldPass(), loginUserInfo.getPass());
-        AssertUtil.isTrue(checkOldPass, ExceptionEnum.OLD_PASS_ERROR);
+        if (!checkOldPass) return Result.error(400, "原密码错误");
         // 新密码与原密码相同
         boolean checkPass = passwordEncoder.matches(query.getNewPass(), loginUserInfo.getPass());
-        AssertUtil.notTrue(checkPass, ExceptionEnum.PASS_SAME);
+        if (checkPass) return Result.error(400, "新密码与原密码相同");
         // 封装修改密码
         Staff staff = new Staff();
         staff.setId(loginUserInfo.getId());

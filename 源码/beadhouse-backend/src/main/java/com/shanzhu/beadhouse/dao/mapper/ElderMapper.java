@@ -48,6 +48,18 @@ public interface ElderMapper extends BaseMapper<Elder> {
     List<Elder> listScopedElders(@Param("name") String name, @Param("phone") String phone,
             @Param("checkFlags") List<String> checkFlags, @Param("scopeStaffId") Long scopeStaffId);
 
+    long countScopedElders(@Param("name") String name,@Param("phone") String phone,
+            @Param("checkFlags") List<String> checkFlags,@Param("scopeStaffId") Long scopeStaffId,
+            @Param("excludeOutward") boolean excludeOutward,@Param("excludePendingRetreat") boolean excludePendingRetreat);
+    List<com.shanzhu.beadhouse.entity.vo.PageSearchElderByKeyVo> pageScopedElders(
+            @Param("name") String name,@Param("phone") String phone,
+            @Param("checkFlags") List<String> checkFlags,@Param("scopeStaffId") Long scopeStaffId,
+            @Param("excludeOutward") boolean excludeOutward,@Param("excludePendingRetreat") boolean excludePendingRetreat,
+            @Param("offset") long offset,@Param("limit") int limit);
+    long countElderRecords(@Param("keyQuery") PageElderByKeyQuery keyQuery,@Param("scopeStaffId") Long scopeStaffId);
+    List<PageElderByKeyVo> pageElderRecords(@Param("keyQuery") PageElderByKeyQuery keyQuery,
+            @Param("scopeStaffId") Long scopeStaffId,@Param("offset") long offset,@Param("limit") int limit);
+
     /**
      * 根据老人编号列表批量取消预定
      *

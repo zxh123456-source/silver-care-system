@@ -5,9 +5,13 @@
       v-model="dialogVisible"
       :title="drawerProps.title"
       destroy-on-close
+      :close-on-click-modal="!submitting"
+      :close-on-press-escape="!submitting"
+      :show-close="!submitting"
     >
       <div>
         <el-form
+          :disabled="drawerProps.isView || loading || submitting"
           :model="formData"
           class="login-form"
           ref="ruleFormRef"
@@ -209,10 +213,12 @@
       </div>
       <template v-if="!drawerProps.isView" #footer>
       <span class="dialog-footer" v-show="show">
-        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button :disabled="submitting" @click="dialogVisible = false">取消</el-button>
         <el-button
           class="bg-blue"
           type="primary"
+          :loading="submitting"
+          :disabled="loading || !detailReady"
           @click="handleSubmit"
         >
           提交
@@ -224,7 +230,12 @@
 </template>
 
 <script lang="ts" setup>
-import { reactive, ref } from "vue";
+import { reactive, ref, watch, onBeforeUnmount } from "vue";
+import store from "@/store";
+import { captureResourceSession, isResourceSessionCurrent } from "@/utils/authResource";
+import type { ResourceSession } from "@/utils/authResource";
+import { createAsyncScope } from "@/utils/asyncScope";
+import type { AsyncTicket } from "@/utils/asyncScope";
 import { ElMessage, FormInstance, FormRules } from "element-plus";
 import {
   idNumRule, integerRule,
@@ -291,7 +302,7 @@ interface DialogProps {
   title: string;
   isView: boolean;
   rowData?: any;
-  api?: (params: any) => Promise<any>;
+  api?: (params: any, session: ResourceSession) => Promise<any>;
   getTableList?: () => Promise<any>;
 }
 
@@ -346,45 +357,89 @@ const formData = ref<any>({
   }
 });
 
-// 接收父组件传过来的参数
+const initialForm = JSON.parse(JSON.stringify(formData.value));
+const loading = ref(false);
+const submitting = ref(false);
+const detailReady = ref(false);
+const dialogScope = createAsyncScope(isResourceSessionCurrent);
+let dialogTicket: AsyncTicket<ResourceSession> | undefined;
+const clearDialogIntent = () => {
+  dialogScope.invalidate();
+  dialogTicket = undefined;
+  loading.value = false;
+  submitting.value = false;
+  detailReady.value = false;
+  formData.value = JSON.parse(JSON.stringify(initialForm));
+};
+watch(dialogVisible, visible => { if (!visible) clearDialogIntent(); }, { flush: 'sync' });
+const sessionChanged = () => {
+  if (dialogTicket && !dialogScope.isCurrent(dialogTicket)) dialogVisible.value = false;
+};
+const stopSessionWatch = watch(() => [store.state.app.token, store.state.app.userPeofile?.userid],
+  sessionChanged, { flush: 'sync' });
+window.addEventListener('storage', sessionChanged);
+onBeforeUnmount(() => {
+  clearDialogIntent();
+  dialogScope.dispose();
+  stopSessionWatch();
+  window.removeEventListener('storage', sessionChanged);
+});
+
 const acceptParams = async (params: DialogProps) => {
-  drawerProps.value = params;
-  show.value = drawerProps.value.title === "编辑"
-  if (drawerProps.value.title === "长者档案") {
-    const echoData: any = await getElderRecordById({
-      elderId: params.rowData.id
-    });
-    formData.value = echoData.data;
-  } else {
-    const echoData: any = await getElderById({
-      elderId: params.rowData.id
-    });
-    formData.value = echoData.data;
+  let ticket: AsyncTicket<ResourceSession> | undefined;
+  try {
+    ticket = dialogScope.begin(captureResourceSession());
+    dialogTicket = ticket;
+    drawerProps.value = { ...params, rowData: { ...params.rowData } };
+    show.value = params.title === '编辑';
+    formData.value = JSON.parse(JSON.stringify(initialForm));
+    detailReady.value = false;
+    submitting.value = false;
+    loading.value = true;
+    dialogVisible.value = true;
+    ruleFormRef.value?.clearValidate?.();
+    if (!params.rowData?.id) throw new Error('请先选择老人');
+    const request = params.title === '长者档案' ? getElderRecordById : getElderById;
+    const response: any = await request({ elderId: params.rowData.id }, ticket.session);
+    if (!dialogScope.isCurrent(ticket) || !dialogVisible.value) return;
+    if (response.code !== 200 || !response.data || typeof response.data !== 'object') {
+      throw new Error(response.msg || '老人资料加载失败，请重新打开');
+    }
+    formData.value = response.data;
+    detailReady.value = true;
+  } catch (failure: any) {
+    if (!ticket) dialogVisible.value = false;
+    if (!ticket || dialogScope.isCurrent(ticket)) ElMessage.error(failure?.msg || failure?.message || '老人资料加载失败，请重试');
+  } finally {
+    if (ticket && dialogScope.isCurrent(ticket)) loading.value = false;
   }
-  dialogVisible.value = true;
 };
 
-//点击提交
-const handleSubmit = () => {
-  ruleFormRef.value!.validate(async valid => {
-    if (!valid) return;
-    try {
-      const res = await drawerProps.value.api!(formData.value);
-      if (res.code == 200) {
-        ElMessage.success({
-          message: res.msg
-        });
-        drawerProps.value.getTableList!();
-        dialogVisible.value = false;
-      } else {
-        ElMessage.error({
-          message: res.msg
-        });
-      }
-    } catch (error) {
-      console.log(error);
+const handleSubmit = async () => {
+  const ticket = dialogTicket;
+  if (!ticket || !dialogScope.isCurrent(ticket)) { dialogVisible.value = false; return; }
+  if (!dialogVisible.value || submitting.value || loading.value || !detailReady.value || drawerProps.value.isView || !ruleFormRef.value) return;
+  submitting.value = true;
+  try {
+    let valid = false;
+    try { valid = await ruleFormRef.value.validate(); } catch { return; }
+    if (!valid || !dialogScope.isCurrent(ticket) || !dialogVisible.value) return;
+    if (!drawerProps.value.api) throw new Error('当前资料暂不可编辑');
+    const response = await drawerProps.value.api(JSON.parse(JSON.stringify(formData.value)), ticket.session);
+    if (!dialogScope.isCurrent(ticket) || !dialogVisible.value) return;
+    if (response.code !== 200) {
+      ElMessage.error(response.msg || '老人资料保存失败，请重试');
+      return;
     }
-  });
+    const refresh = drawerProps.value.getTableList;
+    ElMessage.success(response.msg || '老人资料已保存');
+    dialogVisible.value = false;
+    await refresh?.();
+  } catch (failure: any) {
+    if (dialogScope.isCurrent(ticket)) ElMessage.error(failure?.msg || failure?.message || '老人资料保存失败，请重试');
+  } finally {
+    if (dialogScope.isCurrent(ticket)) submitting.value = false;
+  }
 };
 
 defineExpose({

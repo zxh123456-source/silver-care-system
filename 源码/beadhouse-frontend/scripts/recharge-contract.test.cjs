@@ -19,7 +19,9 @@ function memoryStorage() {
 // Execute the shipped TypeScript functions, with storage and the HTTP adapter as the boundaries.
 // Axios's real default transforms/headers are retained; no network requests are made here.
 function fixture() {
-  const window = { sessionStorage: memoryStorage(), localStorage: memoryStorage(), crypto: webcrypto };
+  const window = { sessionStorage: memoryStorage(), localStorage: memoryStorage(), crypto: webcrypto,
+    location: { origin: "https://care.example" } };
+  const store = { state: { app: { token: "", userPeofile: {} } } };
   const modules = new Map();
   const calls = [];
   const http = {
@@ -37,11 +39,18 @@ function fixture() {
     } }).outputText;
     vm.runInNewContext(code, {
       window, localStorage: window.localStorage, module, exports: module.exports,
-      require: name => name === "@/utils" ? { http } : name.startsWith("@/") ? load(name.slice(2)) : require(name)
+      require: name => name === "@/utils" ? { http }
+        : name === "@/store" ? { default: store, __esModule: true }
+        : name === "@/utils/http" ? { default: http, __esModule: true, isSameOriginApi: config => {
+          const target = new URL(axios.getUri(config), window.location.origin);
+          return target.origin === window.location.origin && /^https?:$/.test(target.protocol) && target.pathname.startsWith("/api/");
+        } }
+        : name.startsWith("@/") ? load(name.slice(2)) : require(name)
     }, { filename: relative + ".ts" });
     return module.exports;
   }
   function session(staffId, token) {
+    store.state.app = { userPeofile: { userid: staffId }, token };
     window.localStorage.setItem("stateData", JSON.stringify({ app: { userPeofile: { userid: staffId }, token } }));
   }
   function dispatch(config, data, headers) {

@@ -51,6 +51,7 @@
 
 <script setup lang="ts" name="useProTable">
 import { onBeforeUnmount, ref, reactive } from "vue";
+import type { ResourceSession } from "@/utils/authResource";
 import { captureResourceSession, isResourceSessionCurrent } from "@/utils/authResource";
 import { ElMessage } from "element-plus";
 import oldDialog from "./oldDialog/index.vue";
@@ -77,9 +78,9 @@ const dataCallback = (data: any) => {
 
 // 如果你想在请求之前对当前请求参数做一些操作，可以自定义如下函数：params 为当前所有的请求参数（包括分页），最后返回请求列表接口
 // 默认不做操作就直接在 ProTable 组件上绑定	:requestApi="getUserList"
-const getTableList = (params: any) => {
+const getTableList = (params: any, session?: ResourceSession) => {
   let newParams = JSON.parse(JSON.stringify(params));
-  return pageElderByKey(newParams);
+  return pageElderByKey(newParams, session);
 };
 
 // Export stays within the captured account and never writes a publicly accessible file.

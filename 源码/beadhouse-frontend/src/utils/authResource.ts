@@ -43,6 +43,12 @@ export function resourceSessionConfig(session: ResourceSession): AxiosRequestCon
   return { transformRequest: [...(Array.isArray(defaults) ? defaults : defaults ? [defaults] : []), bind] };
 }
 
+// These entry points also guard synchronous invocation before Axios queues interceptors.
+export function checkedResourceSessionConfig(session: ResourceSession): AxiosRequestConfig {
+  assertSession(session);
+  return resourceSessionConfig(session);
+}
+
 export function canonicalResourceUrl(value: unknown): string | null {
   if (typeof value !== "string" || !value) return null;
   try {

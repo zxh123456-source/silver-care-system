@@ -61,24 +61,8 @@ public class RetreatApplyServiceImpl implements RetreatApplyService {
 
     @Override
     public Result pageSearchElderByKey(PageSearchElderByKeyQuery query) {
-        List<String> checkFlagList = new ArrayList<>(Collections.singletonList(CheckEnum.ENTER.getStatus()));
-        // 根据姓名和联系电话获取入住和退住审核老人列表
-        List<PageSearchElderByKeyVo> pageSearchElderByKeyVoList = commonFunc.listPageElderByKey(query, checkFlagList);
-        // 获取未审核的退住申请
-        List<RetreatApply> retreatApplyList = retreatApplyFunc.listNotAuditApply();
-        // 根据退住申请列表过滤老人
-        pageSearchElderByKeyVoList = pageSearchElderByKeyVoList.stream().filter(pageSearchElderByKeyVo -> {
-            AtomicBoolean existFlag = new AtomicBoolean(false);
-            retreatApplyList.forEach(outward -> {
-                if (Objects.equals(outward.getElderId(), pageSearchElderByKeyVo.getId())) {
-                    existFlag.set(true);
-                }
-            });
-            return !existFlag.get();
-        }).collect(Collectors.toList());
-        // 封装返回数据
-        PageResult<PageSearchElderByKeyVo> pageResult = pageUtil.packPageResultData(pageSearchElderByKeyVoList, query.getPageNum(), query.getPageSize());
-        return Result.success(pageResult);
+        return commonFunc.pageSearchElderByKeyResult(query,
+                Collections.singletonList(CheckEnum.ENTER.getStatus()),false,true);
     }
 
     @Override

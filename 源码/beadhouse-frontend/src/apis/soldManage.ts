@@ -1,3 +1,5 @@
+import type { ResourceSession } from "@/utils/authResource";
+import { captureResourceSession, checkedResourceSessionConfig } from "@/utils/authResource";
 import { http } from '@/utils'
 
 interface IAddConsult {
@@ -215,8 +217,8 @@ export function pageCommunicationRecord(data: any) {
 }
 
 // 分页搜索老人
-export function pageSearchElderByKey(data: any) {
-  return http.get('/intention/pageSearchElderByKey', {
+export function pageSearchElderByKey(data: any, session: ResourceSession = captureResourceSession()) {
+  return http.get('/api/intention/pageSearchElderByKey', { ...checkedResourceSessionConfig(session),
     params: {
       ...data
     }

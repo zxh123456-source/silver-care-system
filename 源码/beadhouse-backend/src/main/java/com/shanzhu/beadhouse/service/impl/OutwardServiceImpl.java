@@ -61,24 +61,8 @@ public class OutwardServiceImpl implements OutwardService {
 
     @Override
     public Result pageSearchElderByKey(PageSearchElderByKeyQuery query) {
-        List<String> checkFlagList = new ArrayList<>(Arrays.asList(CheckEnum.ENTER.getStatus(), CheckEnum.EXIT_AUDIT.getStatus()));
-        // 根据姓名和联系电话获取入住和退住审核老人列表
-        List<PageSearchElderByKeyVo> pageSearchElderByKeyVoList = commonFunc.listPageElderByKey(query, checkFlagList);
-        // 获取未被删除且未返回的外出登记
-        List<Outward> outwardList = outwardFunc.listNotDelAndNotReturnOutward();
-        // 根据外出登记列表过滤老人
-        pageSearchElderByKeyVoList = pageSearchElderByKeyVoList.stream().filter(pageSearchElderByKeyVo -> {
-            AtomicBoolean existFlag = new AtomicBoolean(false);
-            outwardList.forEach(outward -> {
-                if (Objects.equals(outward.getElderId(), pageSearchElderByKeyVo.getId())) {
-                    existFlag.set(true);
-                }
-            });
-            return !existFlag.get();
-        }).collect(Collectors.toList());
-        // 封装返回数据
-        PageResult<PageSearchElderByKeyVo> pageResult = pageUtil.packPageResultData(pageSearchElderByKeyVoList, query.getPageNum(), query.getPageSize());
-        return Result.success(pageResult);
+        return commonFunc.pageSearchElderByKeyResult(query,
+                Arrays.asList(CheckEnum.ENTER.getStatus(),CheckEnum.EXIT_AUDIT.getStatus()),true,false);
     }
 
     @Override

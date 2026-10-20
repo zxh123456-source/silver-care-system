@@ -1,3 +1,5 @@
+import type { ResourceSession } from "@/utils/authResource";
+import { captureResourceSession, checkedResourceSessionConfig } from "@/utils/authResource";
 import { http } from "@/utils";
 import { IPageSearchElderByKey } from "@/apis/bookManage";
 import type { AxiosRequestConfig, AxiosRequestTransformer } from "axios";
@@ -47,8 +49,8 @@ export async function pageDepositRechargeByKey(data: IPageDepositRechargeByKey) 
 }
 
 // 分页搜索老人
-export function pageSearchElderByKey(data: IPageSearchElderByKey) {
-  return http.get('/api/depositRecharge/pageSearchElderByKey', {
+export function pageSearchElderByKey(data: IPageSearchElderByKey, session: ResourceSession = captureResourceSession()) {
+  return http.get('/api/depositRecharge/pageSearchElderByKey', { ...checkedResourceSessionConfig(session),
     params: {
       ...data
     }

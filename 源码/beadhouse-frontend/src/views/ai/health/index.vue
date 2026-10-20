@@ -60,6 +60,7 @@
 <script setup lang="ts">
 import * as echarts from "echarts";
 import { ElMessage } from "element-plus";
+import { isAxiosError } from "axios";
 import { nextTick, onUnmounted, ref } from "vue";
 import elderListDialog from "@/components/elderListDialog/index.vue";
 import { addHealthMeasurement, getHealthTrend } from "@/apis/aiHealth";
@@ -102,16 +103,30 @@ async function selectElder(row: any) {
   await loadTrend();
 }
 
+function isExpectedRequestFailure(error: unknown): error is { code?: number; msg?: string } {
+  if (isAxiosError(error)) return true;
+  if (Object.prototype.toString.call(error) !== '[object Object]') return false;
+  const result = error as { code?: number; msg?: string };
+  return Number.isInteger(result.code) && result.code! >= 400 && result.code! <= 599 && typeof result.msg === 'string';
+}
+
 async function saveMeasurement() {
+  if (saving.value) return;
   if (!form.value.elderId) return ElMessage.warning("请先选择老人");
   saving.value = true;
+  let saved = false;
   try {
     const res: any = await addHealthMeasurement(form.value);
     if (res.code !== 200) return ElMessage.warning(res.msg || "保存失败");
+    saved = true;
     ElMessage.success("健康测量已保存");
     const elderId = form.value.elderId;
     form.value = { ...emptyForm(), elderId };
     await loadTrend();
+  } catch (error) {
+    if (!isExpectedRequestFailure(error)) throw error;
+    ElMessage.warning(saved ? '测量已保存，趋势暂未刷新，请重新查看'
+      : error.msg || '未确认保存结果，请先核对健康趋势后再重试');
   } finally {
     saving.value = false;
   }

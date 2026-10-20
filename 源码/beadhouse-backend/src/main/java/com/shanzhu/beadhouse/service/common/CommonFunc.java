@@ -23,6 +23,7 @@ import java.util.stream.Collectors;
  */
 @Component
 public class CommonFunc {
+    @Resource private ElderPageService elderPages;
     @Resource
     private ElderFunc elderFunc;
     @Resource
@@ -66,11 +67,13 @@ public class CommonFunc {
      * @return
      */
     public Result pageSearchElderByKeyResult(PageSearchElderByKeyQuery query, List<String> checkFlagList) {
-        // 实体转换
-        List<PageSearchElderByKeyVo> pageSearchElderByKeyVoList = listPageElderByKey(query, checkFlagList);
-        // 封装返回数据
-        PageResult<PageSearchElderByKeyVo> pageResult = pageUtil.packPageResultData(pageSearchElderByKeyVoList, query.getPageNum(), query.getPageSize());
-        return Result.success(pageResult);
+        return pageSearchElderByKeyResult(query,checkFlagList,false,false);
+    }
+
+    public Result pageSearchElderByKeyResult(PageSearchElderByKeyQuery query,List<String> checkFlagList,
+            boolean excludeOutward,boolean excludePendingRetreat) {
+        return Result.success(elderPages.selector(query,checkFlagList,dataScopeService.queryStaffId(),
+                excludeOutward,excludePendingRetreat));
     }
 
     /**
