@@ -1,8 +1,8 @@
 <template>
   <div class="container789">
 
-    <div style="width: 25%; display: flex;background-color: white; ">
-      <div style="flex: 1;width: 100%;padding: 30px;display: flex;flex-direction: column;justify-content: center;" >
+    <div style="width: 25%; min-width: min(360px, calc(100% - 32px)); display: flex;background-color: white; ">
+      <div style="flex: 1;width: 100%;padding: min(30px, 5vw);display: flex;flex-direction: column;justify-content: center;" >
         <div style="text-align: center; font-size: 30px; margin-bottom: 30px; color: #000000;">养 老 院 管 理 系 统</div>
         <el-form
           :model="formData"

@@ -165,6 +165,25 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
                     page.locator(".el-select-dropdown__item:visible").filter(
                         has=page.get_by_text(text, exact=True)).click()
 
+                mobile_login = new_page("mobile-login")
+                for width in (390, 320):
+                    mobile_login.set_viewport_size({"width": width, "height": 844})
+                    mobile_login.goto(origin + "/#/login")
+                    for placeholder in ("账号", "密码", "验证码"):
+                        field = mobile_login.get_by_placeholder(placeholder, exact=True)
+                        expect(field).to_be_visible()
+                        assert field.bounding_box()["width"] >= 40, (width, placeholder)
+                        field.fill("123456")
+                        expect(field).to_have_value("123456")
+                    mobile_login.get_by_role("button", name="忘记密码", exact=True).click()
+                    for placeholder in ("已登记邮箱", "新密码", "确认密码", "验证码"):
+                        field = mobile_login.get_by_placeholder(placeholder, exact=True)
+                        expect(field).to_be_visible()
+                        assert field.bounding_box()["width"] >= 40, (width, placeholder)
+                    assert mobile_login.evaluate("document.documentElement.scrollWidth <= innerWidth")
+                    mobile_login.get_by_role("button", name="返回登录", exact=True).click()
+                record("login and password reset inputs remain usable at 390px and 320px")
+
                 admin = new_page("admin")
                 admin.goto(origin + "/#/login")
                 admin.get_by_placeholder("账号", exact=True).fill("13547584400")

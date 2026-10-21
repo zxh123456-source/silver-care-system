@@ -1,7 +1,7 @@
 <template>
   <div class="container789">
-    <div style="width: 28%; display: flex;background-color: white; border-radius: 10px;">
-      <div style="flex: 1;width: 100%;padding: 40px;display: flex;flex-direction: column;justify-content: center;" >
+    <div style="width: 28%; min-width: min(360px, calc(100% - 32px)); display: flex;background-color: white; border-radius: 10px;">
+      <div style="flex: 1;width: 100%;padding: min(40px, 5vw);display: flex;flex-direction: column;justify-content: center;" >
         <div style="text-align: center; font-size: 20px; margin-bottom: 20px; color: #333">养老院管理系统</div>
 
         <el-form
