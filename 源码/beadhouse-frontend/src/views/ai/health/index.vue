@@ -58,7 +58,7 @@
 </template>
 
 <script setup lang="ts">
-import * as echarts from "echarts";
+import type { ECharts } from "@/utils/charts";
 import { ElMessage } from "element-plus";
 import { isAxiosError } from "axios";
 import { nextTick, onUnmounted, ref } from "vue";
@@ -79,8 +79,9 @@ const elderDialogRef = ref();
 const saving = ref(false);
 const trend = ref<any>(null);
 const chartRef = ref<HTMLElement>();
-let chart: echarts.ECharts | null = null;
+let chart: ECharts | null = null;
 let chartObserver: ResizeObserver | null = null;
+let alive = true;
 const metric = ref("temperature");
 const metrics = [
   { value: "temperature", label: "体温（℃）" },
@@ -135,6 +136,7 @@ async function saveMeasurement() {
 async function loadTrend() {
   if (!form.value.elderId) return;
   const res: any = await getHealthTrend(form.value.elderId);
+  if (!alive) return;
   trend.value = res.data;
   if (!trend.value?.records?.length) {
     chartObserver?.disconnect();
@@ -144,17 +146,28 @@ async function loadTrend() {
     return;
   }
   await nextTick();
-  renderChart();
+  await renderChart();
 }
 
-function renderChart() {
-  if (!chartRef.value || !trend.value?.records?.length) return;
+async function renderChart() {
+  if (!alive || !chartRef.value || !trend.value?.records?.length) return;
+  const element = chartRef.value;
   if (chart && chart.getDom() !== chartRef.value) {
     chartObserver?.disconnect();
     chart.dispose();
     chart = null;
   }
-  if (!chart) chart = echarts.init(chartRef.value);
+  if (!chart) {
+    let echarts: typeof import("@/utils/charts");
+    try {
+      echarts = await import("@/utils/charts");
+    } catch {
+      if (alive) ElMessage.warning("趋势图暂未加载，请稍后重试");
+      return;
+    }
+    if (!alive || chartRef.value !== element || !trend.value?.records?.length) return;
+    if (!chart) chart = echarts.init(element);
+  }
   chartObserver?.disconnect();
   chartObserver = new ResizeObserver(() => chart?.resize());
   chartObserver.observe(chartRef.value);
@@ -170,7 +183,7 @@ function renderChart() {
 
 const resize = () => chart?.resize();
 window.addEventListener("resize", resize);
-onUnmounted(() => { window.removeEventListener("resize", resize); chartObserver?.disconnect(); chart?.dispose(); });
+onUnmounted(() => { alive = false; window.removeEventListener("resize", resize); chartObserver?.disconnect(); chart?.dispose(); chart = null; });
 </script>
 
 <style lang="scss" scoped>

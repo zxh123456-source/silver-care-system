@@ -124,18 +124,13 @@
 </template>
 
 <script setup lang="ts" name="ProTable">
-import { ref, watch, computed, provide, onMounted, type Ref } from 'vue'
+import { ref, watch, provide, onMounted, type Ref } from 'vue'
 import { useTable } from '@/hooks/useTable'
 import { BreakPoint } from '@/components/Grid/interface'
 import { ColumnProps } from '@/components/ProTable/interface'
 import { TableInstance, TableProps } from 'element-plus'
-import { Refresh, Printer, Operation, Search } from '@element-plus/icons-vue'
-import {
-  filterEnum,
-  formatValue,
-  handleProp,
-  handleRowAccordingToProp
-} from '@/utils/util'
+import { Refresh, Operation, Search } from '@element-plus/icons-vue'
+import { handleProp } from '@/utils/util'
 import SearchForm from '@/components/SearchForm/index.vue'
 import Pagination from './components/Pagination.vue'
 import ColSetting from './components/ColSetting.vue'
@@ -275,56 +270,6 @@ const colSetting = tableColumns.value!.filter(
     item.prop !== 'operation'
 )
 const openColSetting = () => colRef.value.openColSetting()
-
-//不需要打印可以把以下方法删除（目前数据处理比较复杂 201-238）
-// 处理打印数据（把后台返回的值根据 enum 做转换）
-const printData = computed(() => {
-  const printDataList = JSON.parse(
-    JSON.stringify(
-      selectedList.value.length ? selectedList.value : tableData.value
-    )
-  )
-  // 找出需要转换数据的列（有 enum || 多级 prop && 需要根据 enum 格式化）
-  const needTransformCol = flatColumns.value!.filter(
-    item =>
-      (item.enum || (item.prop && item.prop.split('.').length > 1)) &&
-      item.isFilterEnum
-  )
-  needTransformCol.forEach(colItem => {
-    printDataList.forEach((tableItem: { [key: string]: any }) => {
-      tableItem[handleProp(colItem.prop!)] =
-        colItem.prop!.split('.').length > 1 && !colItem.enum
-          ? formatValue(handleRowAccordingToProp(tableItem, colItem.prop!))
-          : filterEnum(
-              handleRowAccordingToProp(tableItem, colItem.prop!),
-              enumMap.value.get(colItem.prop!),
-              colItem.fieldNames
-            )
-      for (const key in tableItem) {
-        if (tableItem[key] === null)
-          tableItem[key] = formatValue(tableItem[key])
-      }
-    })
-  })
-  return printDataList
-})
-
-// 打印表格数据（💥 多级表头数据打印时，只能扁平化成一维数组，printJs 不支持多级表头打印）
-// const handlePrint = () => {
-// 	const header = `<div style="text-align: center"><h2>${props.title}</h2></div>`;
-// 	const gridHeaderStyle = "border: 1px solid #ebeef5;height: 45px;color: #232425;text-align: center;background-color: #fafafa;";
-// 	const gridStyle = "border: 1px solid #ebeef5;height: 40px;color: #494b4e;text-align: center";
-// 	printJS({
-// 		printable: printData.value,
-// 		header: props.title && header,
-// 		properties: flatColumns
-// 			.value!.filter(item => !["selection", "index", "expand"].includes(item.type!) && item.isShow && item.prop !== "operation")
-// 			.map((item: ColumnProps) => ({ field: handleProp(item.prop!), displayName: item.label })),
-// 		type: "json",
-// 		gridHeaderStyle,
-// 		gridStyle
-// 	});
-// };
 
 // 暴露给父组件的参数和方法(外部需要什么，都可以从这里暴露出去)
 defineExpose({

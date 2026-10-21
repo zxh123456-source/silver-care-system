@@ -44,6 +44,7 @@ function fixture() {
     if (overrides.has(name)) return overrides.get(name);
     if (name === 'vue') return lifecycleVue;
     if (name === 'echarts') return echarts;
+    if (name === '@/utils/charts') return echarts;
     if (name === '@/store') return { default: store, __esModule: true };
     if (name === 'element-plus') return { ElMessage: message, ElMessageBox: { confirm: async () => true, prompt: (...args) => prompt(...args) } };
     if (name === '@/utils') return { http: load('utils/http/index').default };

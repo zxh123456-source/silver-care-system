@@ -47,6 +47,7 @@
 </template>
 
 <script lang="ts" setup>
+import { handleRequestFailure } from "@/utils/requestFailure";
 import { reactive, ref } from "vue";
 import { ElMessage, FormInstance, FormRules } from "element-plus";
 
@@ -113,7 +114,7 @@ const handleSubmit = async (formRef: FormInstance | null) => {
           });
         }
       } catch (error) {
-        console.log(error);
+        handleRequestFailure(error);
       }
     } else {
       return;

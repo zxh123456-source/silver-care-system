@@ -244,7 +244,7 @@ const forgetPassRules = reactive<FormRules>({
 </script>
 
 <style scoped>
-::v-deep .el-input-group__append {
+:deep(.el-input-group__append) {
   padding: 0;
 }
 

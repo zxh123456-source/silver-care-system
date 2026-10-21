@@ -12,14 +12,14 @@
 </template>
 
 <script lang="ts" setup>
-import * as echarts from 'echarts'
+import type { ECharts } from '@/utils/charts'
 import { onMounted, onBeforeUnmount, ref } from 'vue'
 import { getBusinessTrend } from '@/apis/home'
 
 const trendData = ref<any[]>([])
 const Echarts = ref<HTMLElement | null>(null)
 const loadError = ref('')
-let chart: echarts.ECharts | undefined
+let chart: ECharts | undefined
 let alive = true
 const resizeChart = () => chart?.resize()
 
@@ -30,6 +30,8 @@ onMounted(async () => {
     if (!alive || !Echarts.value) return
     if (response.code !== 200 || !Array.isArray(response.data)) throw new Error('业务趋势加载失败，请刷新重试')
     trendData.value = response.data
+    const echarts = await import('@/utils/charts')
+    if (!alive || !Echarts.value) return
     chart = echarts.init(Echarts.value, 'purple-passion')
     chart.setOption({
       xAxis: { type: 'category', data: trendData.value.map(item => item.month) },

@@ -35,13 +35,7 @@ export default defineConfig({
     preprocessorMaxWorkers: 2,
     preprocessorOptions: {
       scss: {
-        additionalData: (content, filename) => {
-          if (filename.endsWith('variables.module.scss')) return content
-          return `@import "@/styles/variables.module.scss";
-@import "@/styles/mixin.scss";
-@import "@/styles/sidebar.scss";
-${content}`
-        }
+        fatalDeprecations: ['import', 'global-builtin']
       }
     }
   }

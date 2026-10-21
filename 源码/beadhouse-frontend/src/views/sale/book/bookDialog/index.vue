@@ -153,7 +153,7 @@ import { captureResourceSession, isResourceSessionCurrent } from "@/utils/authRe
 import type { ResourceSession } from "@/utils/authResource";
 import elderListDialog from "@/components/elderListDialog/index.vue";
 import treeDialog from "@/components/treeDialog/index.vue";
-import { ElMessage, ElMessageBox, FormInstance, FormRules } from "element-plus";
+import { ElMessage, FormInstance, FormRules } from "element-plus";
 import { Plus } from "@element-plus/icons-vue";
 
 import {
@@ -165,11 +165,7 @@ import {
   disabledNowBeforeDate
 } from "@/utils/formRules";
 
-import {
-  addReserve,
-  getBuildTree, getReserveById, listReserveStaff,
-  pageSearchElderByKey
-} from "@/apis/bookManage";
+import { getBuildTree, getReserveById, listReserveStaff, pageSearchElderByKey } from "@/apis/bookManage";
 
 const ruleFormRef = ref<FormInstance | null>(null);
 const dialogVisible = ref(false);

@@ -47,26 +47,14 @@
 </template>
 
 <script lang="ts" setup>
-import { onMounted, reactive, ref } from "vue";
-import { ElMessage, ElMessageBox, FormInstance, FormRules } from "element-plus";
+import { handleRequestFailure } from "@/utils/requestFailure";
+import { reactive, ref } from "vue";
+import { ElMessage, FormInstance, FormRules } from "element-plus";
 
-import {
-  listConsultSource,
-  listConsultStaff,
-  getConsultByForm
-} from "@/apis/soldManage";
-import {
-  phoneRule,
-  integerRule,
-  stringRule,
-  idNumRule
-} from "@/utils/formRules";
-import { getServiceType } from "@/apis/service";
+import { stringRule } from "@/utils/formRules";
 
 const ruleFormRef = ref<FormInstance | null>(null);
 const dialogVisible = ref(false);
-const ConsultSourceList = ref<{ id: number; name: string | number }[]>([]);
-const ConsultStaffList = ref<{ id: number; name: string | number }[]>([]);
 
 const rules = reactive<FormRules>({
   name: [
@@ -126,7 +114,7 @@ const handleSubmit = async (formRef: FormInstance | null) => {
           });
         }
       } catch (error) {
-        console.log(error);
+        handleRequestFailure(error);
       }
     } else {
       return;

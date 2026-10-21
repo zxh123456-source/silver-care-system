@@ -98,10 +98,11 @@
 </template>
 
 <script lang="ts" setup>
-import { onBeforeUnmount, onMounted, reactive, ref, toRefs } from "vue";
+import { handleRequestFailure } from "@/utils/requestFailure";
+import { reactive, ref } from "vue";
 import elderListDialog from "@/components/elderListDialog/index.vue";
 import uploadImage from "@/components/upload/image/index.vue";
-import { ElMessage, ElMessageBox, FormInstance, FormRules, UploadUserFile } from "element-plus";
+import { ElMessage, FormInstance, FormRules, UploadUserFile } from "element-plus";
 import { Plus } from "@element-plus/icons-vue";
 import {
   stringRule,
@@ -219,7 +220,7 @@ const handleSubmit = () => {
         });
       }
     } catch (error) {
-      console.log(error);
+      handleRequestFailure(error);
     }
   });
 };

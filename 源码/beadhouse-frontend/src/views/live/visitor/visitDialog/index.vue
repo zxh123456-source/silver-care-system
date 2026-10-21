@@ -92,9 +92,10 @@
 </template>
 
 <script lang="ts" setup>
-import { onMounted, reactive, ref, toRefs } from "vue";
+import { handleRequestFailure } from "@/utils/requestFailure";
+import { reactive, ref } from "vue";
 import elderListDialog from "@/components/elderListDialog/index.vue";
-import { ElMessage, ElMessageBox, FormInstance, FormRules } from "element-plus";
+import { ElMessage, FormInstance, FormRules } from "element-plus";
 import { Plus } from "@element-plus/icons-vue";
 import {
   integerRule,
@@ -102,11 +103,10 @@ import {
   stringRule,
   disabledNowAfterDate
 } from "@/utils/formRules";
-import { pageSearchElderByKey, getVisitById, typeList } from "@/apis/visit";
+import { pageSearchElderByKey, getVisitById } from "@/apis/visit";
 
 const ruleFormRef = ref<FormInstance | null>(null);
 const dialogVisible = ref(false);
-const selectTypeList = typeList;
 
 const rules = reactive<FormRules>({
   elderId: [{ required: true, message: "请选择来访老人", trigger: "blur" }],
@@ -225,7 +225,7 @@ const handleSubmit = () => {
         });
       }
     } catch (error) {
-      console.log(error);
+      handleRequestFailure(error);
     }
   });
 };

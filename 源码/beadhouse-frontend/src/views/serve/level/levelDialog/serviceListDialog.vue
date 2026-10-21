@@ -27,7 +27,6 @@
 
 <script lang="ts" setup>
 import { reactive, ref } from "vue";
-import { Plus } from "@element-plus/icons-vue";
 import { ColumnProps } from "@/components/ProTable/interface";
 import { pageServiceByKey } from "@/apis/nurseGrade";
 
@@ -77,14 +76,6 @@ const columns: ColumnProps<any>[] = [
   { prop: "price", label: "服务费用（元）" },
   { prop: "needDate", label: "服务时长（min）" }
 ];
-
-interface DialogProps {
-  isView: boolean;
-}
-
-const drawerProps = ref<DialogProps>({
-  isView: false
-});
 
 // 父组件须调用子组件的方法
 const acceptParams = async () => {

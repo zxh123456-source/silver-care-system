@@ -70,14 +70,13 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, watch } from 'vue'
+import { reactive, ref } from 'vue'
 import { useRenderIcon } from '@/hooks/useIcons'
 import { ReImageVerify } from '@/components/ReImageVerify'
 import { FormInstance, FormRules, ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import store from '@/store'
 import { isNotAccount } from '@/utils/is'
-import { initRoutes } from '@/router/utils'
 const router = useRouter()
 
 const imgCode = ref('')
@@ -188,7 +187,7 @@ const loginRules = reactive<FormRules>({
 </script>
 
 <style scoped>
-::v-deep .el-input-group__append {
+:deep(.el-input-group__append) {
   padding: 0;
 }
 

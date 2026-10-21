@@ -169,7 +169,7 @@
                       <el-button
                         class="bg-blue"
                         type="primary"
-                        icon="Plus"
+                        :icon="Plus"
                         circle
                         style="position: absolute;width: 27.6px;height: 27.6px; top: 6.5px; left: 1.7%;z-index: 1000"
                         @click="addContact"
@@ -246,7 +246,7 @@ import { captureResourceSession, isResourceSessionCurrent } from "@/utils/authRe
 import type { ResourceSession } from "@/utils/authResource";
 import elderListDialog from "@/components/elderListDialog/index.vue";
 import treeDialog from "@/components/treeDialog/index.vue";
-import { ElMessage, ElMessageBox, FormInstance, FormRules } from "element-plus";
+import { ElMessage, FormInstance, FormRules } from "element-plus";
 import { Plus, Delete } from "@element-plus/icons-vue";
 import {
   phoneRule,
@@ -368,11 +368,8 @@ const rules = reactive<FormRules>({
         } else {
           const errExist = ref(false);
           contactList.value.forEach(contact => {
-            const propNum = ref(0);
-            for (var prop in contact) {
-              propNum.value++;
-            }
-            if (propNum.value < 5) {
+            const propNum = Object.keys(contact).length;
+            if (propNum < 5) {
               errExist.value = true;
             }
           });

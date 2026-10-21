@@ -72,7 +72,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, toRefs, ref } from "vue";
+import { onMounted, ref } from "vue";
 import { Delete, Search } from "@element-plus/icons-vue";
 import { listBuilding, listFloorByBuildingId, listRoomByKey } from "@/apis/bedPanorama";
 import malePortrait from "@/assets/imgs/img.png";

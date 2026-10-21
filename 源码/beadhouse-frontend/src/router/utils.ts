@@ -1,6 +1,6 @@
 import { IRoute } from "@/router/types";
 import type { Component } from "vue";
-import { Router, RouteRecordRaw } from "vue-router";
+import { RouteRecordRaw } from "vue-router";
 import router from "./index";
 import store from "@/store";
 import { arrayDeduplicationByFiled } from "@/utils/commonUtil";

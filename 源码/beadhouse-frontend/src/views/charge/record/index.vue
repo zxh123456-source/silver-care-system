@@ -17,10 +17,8 @@
 
 <script setup lang="ts" name="useProTable">
 import { ref, reactive } from "vue";
-import { Plus } from "@icon-park/vue-next";
 import { ColumnProps } from "@/components/ProTable/interface";
 import ProTable from "@/components/ProTable/index.vue";
-import { EditPen } from "@element-plus/icons-vue";
 import { pageConsumeByKey } from "@/apis/consume";
 
 // 获取 ProTable 元素，调用其获取刷新数据方法（还能获取到当前查询参数，方便导出携带参数）

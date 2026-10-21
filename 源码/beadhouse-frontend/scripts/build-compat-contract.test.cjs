@@ -9,6 +9,58 @@ const dependencyRequire = process.env.FRONTEND_TEST_DEPENDENCIES
 const ts = dependencyRequire('typescript');
 const { parse } = dependencyRequire('@vue/compiler-sfc');
 
+test('Element Plus icon consumers have local bindings without registering the entire icon library', () => {
+  const { babelParse } = dependencyRequire('@vue/compiler-sfc');
+  const icons = dependencyRequire('@element-plus/icons-vue');
+  const sourceRoot = path.join(__dirname, '../src');
+  let consumers = 0;
+  for (const file of fs.readdirSync(sourceRoot, { recursive: true }).filter(file => file.endsWith('.vue'))) {
+    const filename = path.join(sourceRoot, file);
+    const { descriptor } = parse(fs.readFileSync(filename, 'utf8'), { filename });
+    const bindings = new Set();
+    for (const script of [descriptor.script, descriptor.scriptSetup].filter(Boolean)) {
+      const ast = babelParse(script.content, { sourceType: 'module', plugins: ['typescript', ...(script.lang === 'tsx' ? ['jsx'] : [])] });
+      for (const node of ast.program.body) {
+        if (node.type === 'ImportDeclaration') node.specifiers.forEach(binding => bindings.add(binding.local.name));
+        if (node.type === 'VariableDeclaration') node.declarations.forEach(declaration => {
+          if (declaration.id.type === 'Identifier') bindings.add(declaration.id.name);
+        });
+      }
+    }
+    function visit(node) {
+      if (node.type === 1 && Object.hasOwn(icons, node.tag)) {
+        consumers++;
+        assert.ok(bindings.has(node.tag), `${file}: ${node.tag} must have a local binding`);
+      }
+      if (node.type === 1 && /^(el-|El[A-Z])/.test(node.tag)) {
+        for (const prop of node.props || []) {
+          if (prop.type === 7 && prop.name === 'bind' && prop.arg && /(^|-)icon$/.test(prop.arg.content)
+            && prop.exp && Object.hasOwn(icons, prop.exp.content)) {
+            assert.ok(bindings.has(prop.exp.content), `${file}: ${prop.exp.content} must be bound locally`);
+          }
+          if (prop.type !== 6 || !/(^|-)icon$/.test(prop.name) || !prop.value) continue;
+          const icon = prop.value.content.replace(/(^|[-_])(\w)/g, (_, separator, letter) => letter.toUpperCase());
+          assert.ok(!Object.hasOwn(icons, icon), `${file}: ${prop.name}="${prop.value.content}" relies on global icon registration; bind the component`);
+        }
+      }
+      (node.children || []).forEach(visit);
+    }
+    if (descriptor.template) visit(descriptor.template.ast);
+  }
+  assert.ok(consumers > 0);
+});
+
+test('Element Plus renders a directly bound icon without registering all global icons', async () => {
+  const { createSSRApp, h } = dependencyRequire('vue');
+  const { renderToString } = dependencyRequire('vue/server-renderer');
+  const { ElButton, default: ElementPlus } = dependencyRequire('element-plus');
+  const { Plus } = dependencyRequire('@element-plus/icons-vue');
+  const app = createSSRApp({ render: () => h(ElButton, { icon: Plus }, () => '添加') });
+  app.use(ElementPlus);
+  assert.equal(app.component('Plus'), undefined);
+  assert.match(await renderToString(app), /<svg\b[^>]*viewBox=/);
+});
+
 test('the configured Chinese locale resolves through the actual ESM package exports', () => {
   const app = fs.readFileSync(path.join(__dirname, '../src/App.vue'), 'utf8');
   const specifier = app.match(/import zhCn from ['"]([^'"]+)['"]/)[1];

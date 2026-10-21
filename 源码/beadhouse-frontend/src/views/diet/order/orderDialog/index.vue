@@ -73,7 +73,7 @@
                       <el-button
                         class="bg-blue"
                         type="primary"
-                        icon="Plus"
+                        :icon="Plus"
                         circle
                         style="position: absolute;width: 27.6px;height: 27.6px; top: 6.5px; left: 1.7%;z-index: 1000"
                         @click="openDishesDrawer"
@@ -162,17 +162,15 @@
 </template>
 
 <script lang="ts" setup>
+import { handleRequestFailure } from "@/utils/requestFailure";
 import { reactive, ref } from "vue";
 import elderListDialog from "@/components/elderListDialog/index.vue";
 import dishesListDialog from "@/views/diet/package/packageDialog/dishesListDialog.vue";
 import { ElMessage, FormInstance, FormRules } from "element-plus";
 import { Plus, Delete } from "@element-plus/icons-vue";
 import { IDineTypeList, listNurseStaff, pageSearchElderByKey } from "@/apis/order";
-import { arrayDeduplicationByFiled, arrayPushAllByFiled, arrayPushAllByObj, initArray } from "@/utils/commonUtil";
-import {
-  disabledNowBeforeDate,
-  disabledNowAfterDate
-} from "@/utils/formRules"
+import { arrayDeduplicationByFiled, initArray } from "@/utils/commonUtil";
+import { disabledNowBeforeDate } from "@/utils/formRules"
 
 const ruleFormRef = ref<FormInstance | null>(null);
 const dialogVisible = ref(false);
@@ -322,7 +320,7 @@ const handleSubmit = () => {
         });
       }
     } catch (error) {
-      console.log(error);
+      handleRequestFailure(error);
     }
   });
 };

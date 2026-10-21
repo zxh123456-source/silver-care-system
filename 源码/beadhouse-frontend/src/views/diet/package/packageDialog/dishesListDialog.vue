@@ -76,14 +76,6 @@ const columns: ColumnProps<any>[] = [
   { prop: "typeName", label: "菜品类别" }
 ];
 
-interface DialogProps {
-  isView: boolean;
-}
-
-const drawerProps = ref<DialogProps>({
-  isView: false
-});
-
 // 父组件须调用子组件的方法
 const acceptParams = async () => {
   dialogVisible.value = true;

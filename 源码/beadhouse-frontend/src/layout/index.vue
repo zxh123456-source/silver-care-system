@@ -28,7 +28,6 @@
 <script setup lang="ts">
 import SideBar from './components/SideBar/index.vue'
 import NavBar from './components/NavBar/index.vue'
-import store from '@/store'
 
 // window.onresize = () =>
 //   (() => {

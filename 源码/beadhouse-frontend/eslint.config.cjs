@@ -15,8 +15,8 @@ module.exports = ts.config(
       parserOptions: { parser: ts.parser, ecmaFeatures: { jsx: true }, extraFileExtensions: ['.vue'] }
     },
     rules: {
-      'no-console': process.env.NODE_ENV === 'production' ? 'warn' : 'off',
-      'no-debugger': process.env.NODE_ENV === 'production' ? 'warn' : 'off',
+      'no-console': 'warn',
+      'no-debugger': 'warn',
       'vue/multi-word-component-names': 'off',
       'vue/no-mutating-props': 'off',
       '@typescript-eslint/no-explicit-any': 'off',

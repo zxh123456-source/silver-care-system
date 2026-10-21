@@ -232,6 +232,8 @@ jobs:
         run: npm run test:ui-recovery
       - name: Verify build migration and dependency compatibility
         run: npm run test:build-compat && npm run test:dependency-security
+      - name: Verify chart loading, failure boundaries, Sass and bundle accounting
+        run: npm run test:charts && npm run test:request-failure && npm run test:styles && npm run test:bundle-budget
       - name: Audit complete and production dependency graphs
         run: npm run audit:dependencies
       - name: Build with TypeScript and ESLint checks

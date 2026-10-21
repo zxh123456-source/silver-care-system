@@ -16,8 +16,7 @@
     "types": ["vite/client", "node"],
     "paths": {
       "@/*": ["src/*"],
-      "vuex": ["node_modules/vuex/types/index.d.ts"],
-      "@vueuse/motion": ["node_modules/@vueuse/motion/dist/index.d.ts"]
+      "vuex": ["node_modules/vuex/types/index.d.ts"]
     },
     "lib": ["ES2021", "dom", "dom.iterable", "scripthost"],
 

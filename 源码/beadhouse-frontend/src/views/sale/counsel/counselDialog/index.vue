@@ -146,8 +146,9 @@
 </template>
 
 <script lang="ts" setup>
-import { onMounted, reactive, ref } from "vue";
-import { ElMessage, ElMessageBox, FormInstance, FormRules } from "element-plus";
+import { handleRequestFailure } from "@/utils/requestFailure";
+import { reactive, ref } from "vue";
+import { ElMessage, FormInstance, FormRules } from "element-plus";
 
 import {
   listConsultSource,
@@ -320,7 +321,7 @@ const handleSubmit = async (formRef: FormInstance | null) => {
           });
         }
       } catch (error) {
-        console.log(error);
+        handleRequestFailure(error);
       }
     } else {
       return;

@@ -584,6 +584,16 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
                 for value in ("36.0", "38.2"):
                     temperature.fill(value)
                     click_api(staff, staff.get_by_role("button", name="保存测量"), "/api/ai/health/measurement")
+                chart_canvas = staff.locator(".chart canvas").first
+                expect(chart_canvas).to_be_visible()
+                staff.wait_for_function("document.querySelector('.chart canvas')?.width > 0")
+                chart_box = staff.locator(".chart").bounding_box()
+                staff.locator(".chart").hover(position={"x": chart_box["width"] * .6, "y": chart_box["height"] * .5})
+                expect(staff.locator(".chart").get_by_text("体温（℃）", exact=True).first).to_be_visible()
+                old_canvas_width = chart_canvas.get_attribute("width")
+                staff.set_viewport_size({"width": 1440, "height": 1000})
+                staff.wait_for_function("old => document.querySelector('.chart canvas')?.getAttribute('width') !== old", arg=old_canvas_width)
+                staff.set_viewport_size({"width": 1600, "height": 1000})
                 route(staff, "/ai-care/daily", "每日护理助手")
                 personal_notices = staff.locator(".notification-center")
                 expect(personal_notices).not_to_contain_text("E2E自动核对计划")

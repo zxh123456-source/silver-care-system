@@ -57,7 +57,7 @@
                       <el-button
                         class="bg-blue"
                         type="primary"
-                        icon="Plus"
+                        :icon="Plus"
                         circle
                         style="position: absolute;width: 27.6px;height: 27.6px; top: 6.5px; left: 1.7%;z-index: 1000"
                         @click="openDrawer"
@@ -114,14 +114,12 @@
 </template>
 
 <script lang="ts" setup>
+import { handleRequestFailure } from "@/utils/requestFailure";
 import { reactive, ref } from "vue";
 import serviceListDialog from "./serviceListDialog.vue";
 import { ElMessage, FormInstance, FormRules } from "element-plus";
-import { Delete } from "@element-plus/icons-vue";
-import {
-  integerRule, numberRule,
-  stringRule
-} from "@/utils/formRules";
+import { Delete, Plus } from "@element-plus/icons-vue";
+import { numberRule, stringRule } from "@/utils/formRules";
 import { getNurseGradeById, INurseTypeList } from "@/apis/nurseGrade";
 import { arrayDeduplicationByFiled, arrayPushAllByFiled, arrayPushAllByObj, initArray } from "@/utils/commonUtil";
 
@@ -247,7 +245,7 @@ const handleSubmit = () => {
         });
       }
     } catch (error) {
-      console.log(error);
+      handleRequestFailure(error);
     }
   });
 };
