@@ -195,9 +195,9 @@ Tailwind 使用 `source(none)` 和显式 `@source '../'` 仅扫描 `src`，避�
 
 `npm run audit:dependencies` 分别审计完整依赖和生产依赖，任何级别告警都失败；不能以转移到开发依赖或忽略公告代替修复。兼容回归命令为 `npm run test:build-compat` 和 `npm run test:dependency-security`，覆盖懒路由、ESM中文语言包、SVG/床位图片、真实 CSS 生成与提交工具的临时文件安全。
 
-GitHub Actions 的 `CI` 工作流在 main 推送、面向 main 的 PR（含草稿）及手动触发时运行：数据库迁移/恢复、后端 JDK 8 完整构建和独立 MySQL/Redis 集成、前端 Node 24 全新 `npm ci`与业务/依赖兼容契约、完整/生产依赖审计及构建、Python 3.12全依赖/pytest/真实BGE质量门禁，以及Chromium端到端回归和 Windows 启停所有权/恢复行为回归。关键的十七组后端集成（含权限、认证、附件、资金/床位并发、告警、RAG租约及实际SQL分页）若缺失或跳过，CI会失败。报告作为artifact保留7天；普通ESLint警告不导致构建失败。
+GitHub Actions 的 `CI` 工作流在 main 推送、面向 main 的 PR（含草稿）及手动触发时运行：数据库迁移/恢复、后端 JDK 8 完整构建和独立 MySQL/Redis 集成、前端 Node 24 全新 `npm ci`与79项业务/依赖兼容契约、完整/生产依赖审计及构建、Python 3.12全依赖/pytest/真实BGE质量门禁，以及33项Chromium端到端回归和 Windows 启停所有权/恢复行为回归。关键的十七组后端集成（含权限、认证、附件、资金/床位并发、告警、RAG租约及实际SQL分页）若缺失或跳过，CI会失败。报告作为artifact保留7天；普通ESLint警告不导致构建失败。
 
-CI使用临时库和合成凭据，不读取本地 `.env`，不需要GitHub Secrets，不投递真实邮件或调用付费模型。浏览器使用已验证的同一JAR/dist，在全新MySQL/专用Redis验证真实业务页面及数据库写入，并对丢响应、延迟和暂时失败做定向故障注入。失败保留截图、trace、后端日志和JUnit；Vue捕获后输出的console.error也纳入异常门禁。OCR仍按环境执行，Windows Tesseract相关项在Linux跳过。BGE评测仅覆盖当前合成制度语料；其他浏览器、移动端需另行验证；完整 Windows/Docker Desktop 一键启动另通过隔离副本验收，不由 Linux 浏览器代理测试代替。
+CI使用临时库和合成凭据，不读取本地 `.env`，不需要GitHub Secrets，不投递真实邮件或调用付费模型。浏览器使用已验证的同一JAR/dist，在全新MySQL/专用Redis验证真实业务页面及数据库写入，并对丢响应、延迟和暂时失败做定向故障注入。失败保留截图、trace、后端日志和JUnit；Vue捕获后输出的console.error也纳入异常门禁。OCR仍按环境执行，Windows Tesseract相关项在Linux跳过。BGE评测仅覆盖当前合成制度语料；除登录/找回密码320px和390px输入回归外，其他移动业务页及其他浏览器需另行验证；完整 Windows/Docker Desktop 一键启动另通过隔离副本验收，不由 Linux 浏览器代理测试代替。
 
 Python job启动隔离认证Milvus/MinIO/etcd，强制5项真实索引故障/乱序/集合重建及Linux fork回归；再以实际BGE执行独立服务和随机集合的质量门禁，报告模型SHA、逐题结果及分组延迟，详见 [RAG评测与基线](./源码/beadhouse-ai/README.md)。测试集合和数据卷结束时清理。
 
