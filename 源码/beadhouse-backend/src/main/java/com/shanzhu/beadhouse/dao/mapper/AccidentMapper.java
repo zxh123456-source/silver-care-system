@@ -6,6 +6,7 @@ import com.shanzhu.beadhouse.entity.query.PageAccidentByKeyQuery;
 import com.shanzhu.beadhouse.entity.vo.GetAccidentByIdVo;
 import com.shanzhu.beadhouse.entity.vo.PageAccidentByKeyVo;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 
 import java.util.List;
 
@@ -18,13 +19,17 @@ import java.util.List;
  * @date: 2024-08-10
  */
 public interface AccidentMapper extends BaseMapper<Accident> {
+    @Select("SELECT * FROM accident WHERE id = #{id} FOR UPDATE")
+    Accident selectByIdForUpdate(@Param("id") Long id);
+
     /**
      * 根据关键字获取事故登记列表
      *
      * @param keyQuery
      * @return
      */
-    List<PageAccidentByKeyVo> listAccidentByKeyVo(@Param("keyQuery") PageAccidentByKeyQuery keyQuery);
+    List<PageAccidentByKeyVo> listAccidentByKeyVo(@Param("keyQuery") PageAccidentByKeyQuery keyQuery,
+            @Param("scopeStaffId") Long scopeStaffId);
 
     /**
      * 根据编号获取事故登记

@@ -27,6 +27,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Isolation;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.annotation.Resource;
@@ -69,14 +70,13 @@ public class AiPolicyServiceImpl implements AiPolicyService {
     private AiMetricRecorder metricRecorder;
 
     @Override
-    @Transactional
+    @Transactional(isolation=Isolation.READ_COMMITTED)
     public Result importPolicy(PolicyImportQuery query) {
         if (query == null || blank(query.getTitle()) || blank(query.getSource()) || blank(query.getContent())) {
             return Result.error(400, "制度标题、来源和正文不能为空");
         }
-        int replaced = policyDocMapper.delete(new QueryWrapper<PolicyDoc>()
-                .eq("title", query.getTitle().trim())
-                .eq("source", query.getSource().trim()));
+        ragSyncService.lockDocument(query.getTitle(),query.getSource());
+        int replaced = policyDocMapper.delete(ragSyncService.exactSource(query.getTitle(),query.getSource()));
         List<String> chunks = splitChunks(query.getContent());
         List<PolicyDoc> insertedDocs = new ArrayList<>();
         int sectionNo = 1;
@@ -175,10 +175,11 @@ public class AiPolicyServiceImpl implements AiPolicyService {
     }
 
     @Override
-    @Transactional
+    @Transactional(isolation=Isolation.READ_COMMITTED)
     public Result deleteDocument(String title, String source) {
         if (blank(title) || blank(source)) return Result.error(400, "制度标题和来源不能为空");
-        int count = policyDocMapper.delete(new QueryWrapper<PolicyDoc>().eq("title", title).eq("source", source));
+        ragSyncService.lockDocument(title,source);
+        int count = policyDocMapper.delete(ragSyncService.exactSource(title,source));
         String documentKey = ragSyncService.enqueueDelete(title, source);
         auditRecorder.record("制度知识库", "删除制度", "policy_doc", null,
                 "删除片段=" + count + "，文档键=" + shortKey(documentKey));

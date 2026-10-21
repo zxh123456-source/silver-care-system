@@ -22,6 +22,7 @@
         LEFT JOIN staff st ON st.id = c.staff_id
         <where>
             e.check_flag = '咨询中'
+            <include refid="com.shanzhu.beadhouse.dao.mapper.ElderMapper.assignmentScope"/>
             <if test="keyQuery.sourceId != null">
                 AND so.id = #{keyQuery.sourceId}
             </if>

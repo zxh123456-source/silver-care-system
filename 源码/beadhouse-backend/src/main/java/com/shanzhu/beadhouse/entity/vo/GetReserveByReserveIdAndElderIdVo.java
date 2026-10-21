@@ -9,6 +9,8 @@ import java.math.BigDecimal;
 @Data
 @ApiModel(value = "根据预定编号和老人编号获取预定信息响应实体")
 public class GetReserveByReserveIdAndElderIdVo {
+    private Long bedId;
+    private String state;
     @ApiModelProperty(value = "老人姓名", example = "张三")
     private String elderName;
     @ApiModelProperty(value = "身份证号", example = "null")

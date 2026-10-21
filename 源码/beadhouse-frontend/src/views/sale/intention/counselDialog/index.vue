@@ -137,8 +137,9 @@
 </template>
 
 <script lang="ts" setup>
-import { onMounted, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox, FormInstance } from 'element-plus'
+import { handleRequestFailure } from '@/utils/requestFailure'
+import { reactive, ref } from 'vue'
+import { ElMessage, FormInstance } from 'element-plus'
 
 import {
   listConsultSource,
@@ -172,14 +173,6 @@ interface DialogProps {
   rowData?: any
   api?: (params: any) => Promise<any>
   getTableList?: () => Promise<any>
-}
-
-function fullOpen(n: number, m: number) {
-  let result = Math.random() * (m - n) + n
-  while (result == n) {
-    result = Math.random() * (m - n) + n
-  }
-  return Math.floor(result)
 }
 
 const drawerProps = ref<DialogProps>({
@@ -239,7 +232,7 @@ const handleSubmit = () => {
         })
       }
     } catch (error) {
-      console.log(error)
+      handleRequestFailure(error)
     }
   })
 }

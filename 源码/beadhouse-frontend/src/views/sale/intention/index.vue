@@ -52,27 +52,17 @@
 
 <script setup lang="tsx" name="useProTable">
 import { ref, reactive } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { ColumnProps } from '@/components/ProTable/interface'
 import ProTable from '@/components/ProTable/index.vue'
 import counselDialong from './counselDialog/index.vue'
-import {
-  CirclePlus,
-  Delete,
-  EditPen,
-  Download,
-  Upload,
-  View,
-  Refresh
-} from '@element-plus/icons-vue'
+import { CirclePlus, Delete, EditPen, Download, Upload, View } from '@element-plus/icons-vue'
 import {
   pageIntentionByKey,
   addIntention,
   editIntention,
   addCommunicationRecord
 } from '@/apis/soldManage'
-const router = useRouter()
 
 const proTable = ref()
 

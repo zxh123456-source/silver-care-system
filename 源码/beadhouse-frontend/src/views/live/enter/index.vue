@@ -1,5 +1,6 @@
 <template>
   <div class="table-box">
+    <el-alert title="退住请使用退住申请流程；退住审核期间暂停合同修改和换床。" type="info" :closable="false" />
     <ProTable
       ref="proTable"
       title="用户列表"
@@ -27,6 +28,7 @@
           查看
         </el-button>
         <el-button
+          v-if="scope.row.checkFlag === '入住'"
           size="small"
           link
           :icon="EditPen"
@@ -34,15 +36,6 @@
         >
           编辑
         </el-button>
-        <el-popconfirm
-          title="Are you sure to delete this?"
-          @confirm="deleteData(scope)"
-          confirm-button-type="danger"
-        >
-          <template #reference>
-            <el-button size="small" link :icon="Delete">删除</el-button>
-          </template>
-        </el-popconfirm>
       </template>
     </ProTable>
     <enterDialog ref="DialogRef" />
@@ -51,13 +44,12 @@
 
 <script setup lang="ts" name="useProTable">
 import { ref, reactive } from "vue";
-import { ElMessage } from "element-plus";
 import enterDialog from "./enterDialog/index.vue";
 import { Plus } from "@icon-park/vue-next";
 import { ColumnProps } from "@/components/ProTable/interface";
 import ProTable from "@/components/ProTable/index.vue";
-import { Delete, EditPen, View } from "@element-plus/icons-vue";
-import { addCheckContract, deleteCheckContract, editCheckContract, pageCheckContractByKey } from "@/apis/checkContract";
+import { EditPen, View } from "@element-plus/icons-vue";
+import { addCheckContract, editCheckContract, pageCheckContractByKey } from "@/apis/checkContract";
 
 // 获取 ProTable 元素，调用其获取刷新数据方法（还能获取到当前查询参数，方便导出携带参数）
 const proTable = ref();
@@ -79,19 +71,6 @@ const dataCallback = (data: any) => {
 const getTableList = (params: any) => {
   let newParams = JSON.parse(JSON.stringify(params));
   return pageCheckContractByKey(newParams);
-};
-
-// 删除
-const deleteData = async (params: any) => {
-  const res: any = await deleteCheckContract({
-    elderId: params.row.id
-  });
-  if (res.code === 200) {
-    ElMessage.success(res.msg);
-    proTable.value.getTableList();
-  } else {
-    ElMessage.error(res.msg);
-  }
 };
 
 // 打开 drawer(新增、查看、编辑)

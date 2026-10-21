@@ -12,9 +12,11 @@
       </el-header>
       <el-main>
         <el-scrollbar>
-          <router-view v-slot="{ Component }">
+          <router-view v-slot="{ Component, route }">
             <transition name="fade-transform" mode="out-in">
-              <component :is="Component" />
+              <div :key="route.path" class="route-view">
+                <component :is="Component" />
+              </div>
             </transition>
           </router-view>
         </el-scrollbar>
@@ -26,7 +28,6 @@
 <script setup lang="ts">
 import SideBar from './components/SideBar/index.vue'
 import NavBar from './components/NavBar/index.vue'
-import store from '@/store'
 
 // window.onresize = () =>
 //   (() => {

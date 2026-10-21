@@ -4,12 +4,14 @@
       <Breadcrumb />
     </div>
     <div class="nav-right">
+      <CareNotifications />
       <Avatar class="nav-item" />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import CareNotifications from './components/CareNotifications.vue'
 import Avatar from './components/Avatar.vue'
 import Breadcrumb from './components/Breadcrumb.vue'
 </script>

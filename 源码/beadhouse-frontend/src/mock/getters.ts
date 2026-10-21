@@ -1,4 +1,4 @@
-import { routes, users, IRoute, IUser } from './index'
+import { routes, users, IUser } from './index'
 import store from '@/store'
 
 // 获取路由列表

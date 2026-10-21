@@ -1,6 +1,45 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.shanzhu.beadhouse.dao.mapper.ElderMapper">
+    <!-- All callers use alias e for elder; the bound staff ID comes from the server session. -->
+    <sql id="assignmentScope">
+        <if test="scopeStaffId != null">
+            AND (EXISTS (SELECT 1 FROM elder_staff_assignment esa
+                WHERE esa.elder_id = e.id AND esa.staff_id = #{scopeStaffId} AND esa.active = 'Y')
+                OR (e.check_flag IN ('咨询中','意向跟进','预定') AND (
+                    e.create_id = #{scopeStaffId}
+                    OR EXISTS (SELECT 1 FROM consult ec WHERE ec.elder_id=e.id AND ec.staff_id=#{scopeStaffId})
+                    OR EXISTS (SELECT 1 FROM reserve er WHERE er.elder_id=e.id AND er.staff_id=#{scopeStaffId} AND er.reserve_flag='N' AND er.state='ACTIVE')
+                )))
+        </if>
+    </sql>
+    <select id="listAccessibleElderIds" resultType="java.lang.Long">
+        SELECT e.id FROM elder e WHERE 1=1
+        <include refid="assignmentScope"/>
+        <if test="candidateIds != null">
+            <choose>
+                <when test="candidateIds.size() > 0">AND e.id IN <foreach collection="candidateIds" item="id" open="(" separator="," close=")">#{id}</foreach></when>
+                <otherwise>AND 1=0</otherwise>
+            </choose>
+        </if>
+    </select>
+    <select id="listScopedElders" resultType="com.shanzhu.beadhouse.entity.po.Elder">
+        SELECT e.* FROM elder e
+        <where>
+            e.id IS NOT NULL
+            <include refid="assignmentScope"/>
+            <choose>
+                <when test="checkFlags != null and checkFlags.size() > 0">
+                    AND e.check_flag IN
+                    <foreach collection="checkFlags" item="flag" open="(" separator="," close=")">#{flag}</foreach>
+                </when>
+                <otherwise>AND 1 = 0</otherwise>
+            </choose>
+            <if test="name != null and name != ''">AND e.name LIKE concat('%', #{name}, '%')</if>
+            <if test="phone != null and phone != ''">AND e.phone LIKE concat('%', #{phone}, '%')</if>
+        </where>
+        ORDER BY e.id
+    </select>
     <select id="listDepositRechargeByKey" resultType="com.shanzhu.beadhouse.entity.vo.PageDepositRechargeByKeyVo">
         SELECT
         e.id AS elder_id,
@@ -14,6 +53,7 @@
         LEFT JOIN bed b ON b.id = e.bed_id
         <where>
             e.id IS NOT NULL
+            <include refid="assignmentScope"/>
             AND (e.check_flag = "入住" OR e.check_flag = "退住审核")
             <if test="keyQuery.name != null and keyQuery.name != '' and keyQuery.name != 'null'">
                 AND e.name LIKE concat('%', #{keyQuery.name,jdbcType=VARCHAR}, '%')
@@ -42,6 +82,7 @@
         LEFT JOIN bed b ON b.id = e.bed_id
         <where>
             e.check_flag != '已失效'
+            <include refid="assignmentScope"/>
             <if test="keyQuery.elderName != null and keyQuery.elderName != '' and keyQuery.elderName != 'null'">
                 AND e.name LIKE concat('%', #{keyQuery.elderName,jdbcType=VARCHAR}, '%')
             </if>
@@ -52,6 +93,58 @@
                 AND e.sex = #{keyQuery.elderSex}
             </if>
         </where>
+    </select>
+    <!-- The exclusion switches are selected by services, never bound from public query DTOs. -->
+    <sql id="scopedElderPageFilter">
+        e.id IS NOT NULL
+        <include refid="assignmentScope"/>
+        <choose>
+            <when test="checkFlags != null and checkFlags.size() > 0">
+                AND e.check_flag IN
+                <foreach collection="checkFlags" item="flag" open="(" separator="," close=")">#{flag}</foreach>
+            </when>
+            <otherwise>AND 1=0</otherwise>
+        </choose>
+        <if test="name != null and name != ''">AND e.name LIKE concat('%',#{name},'%')</if>
+        <if test="phone != null and phone != ''">AND e.phone LIKE concat('%',#{phone},'%')</if>
+        <if test="excludeOutward">
+            AND NOT EXISTS (SELECT 1 FROM outward o WHERE o.elder_id=e.id
+                AND o.real_return_date IS NULL AND o.del_flag='N')
+        </if>
+        <if test="excludePendingRetreat">
+            AND NOT EXISTS (SELECT 1 FROM retreat_apply ra WHERE ra.pending_elder_id=e.id
+                AND ra.apply_flag='待审核')
+        </if>
+    </sql>
+    <select id="countScopedElders" resultType="java.lang.Long">
+        SELECT COUNT(*) FROM elder e WHERE <include refid="scopedElderPageFilter"/>
+    </select>
+    <select id="pageScopedElders" resultType="com.shanzhu.beadhouse.entity.vo.PageSearchElderByKeyVo">
+        SELECT e.id,e.name,e.id_num,e.age,e.sex,e.phone,e.address
+        FROM elder e WHERE <include refid="scopedElderPageFilter"/>
+        ORDER BY e.id LIMIT #{limit} OFFSET #{offset}
+    </select>
+    <sql id="elderRecordPageFilter">
+        e.check_flag != '已失效'
+        <include refid="assignmentScope"/>
+        <if test="keyQuery.elderName != null and keyQuery.elderName != '' and keyQuery.elderName != 'null'">
+            AND e.name LIKE concat('%',#{keyQuery.elderName,jdbcType=VARCHAR},'%')
+        </if>
+        <if test="keyQuery.idNum != null and keyQuery.idNum != '' and keyQuery.idNum != 'null'">
+            AND e.id_num LIKE concat('%',#{keyQuery.idNum,jdbcType=VARCHAR},'%')
+        </if>
+        <if test="keyQuery.elderSex != null and keyQuery.elderSex != '' and keyQuery.elderSex != 'null'">
+            AND e.sex=#{keyQuery.elderSex}
+        </if>
+    </sql>
+    <select id="countElderRecords" resultType="java.lang.Long">
+        SELECT COUNT(*) FROM elder e WHERE <include refid="elderRecordPageFilter"/>
+    </select>
+    <select id="pageElderRecords" resultType="com.shanzhu.beadhouse.entity.vo.PageElderByKeyVo">
+        SELECT e.id,b.name AS bed_name,e.name,e.id_num,e.age,e.sex,e.phone,e.address,e.check_flag
+        FROM elder e LEFT JOIN bed b ON b.id=e.bed_id
+        WHERE <include refid="elderRecordPageFilter"/>
+        ORDER BY e.id LIMIT #{limit} OFFSET #{offset}
     </select>
     <update id="cancelReserveByElderIdList">
         UPDATE elder

@@ -73,7 +73,7 @@ public class AiMetricsServiceImpl implements AiMetricsService {
         result.setPolicyGroundedRate(rate(grounded, policy.size()));
         result.setModelUseRate(rate(modelUsed, total));
         result.setP95LatencyMs(percentile95(durations));
-        result.setRagPending(ragSyncMapper.selectCount(new QueryWrapper<PolicyRagSync>().eq("status", "PENDING")).intValue());
+        result.setRagPending(ragSyncMapper.selectCount(new QueryWrapper<PolicyRagSync>().in("status", "PENDING", "PROCESSING")).intValue());
         result.setRagFailed(ragSyncMapper.selectCount(new QueryWrapper<PolicyRagSync>().eq("status", "FAILED")).intValue());
         result.setDaily(daily);
         result.setByFeature(byFeature);

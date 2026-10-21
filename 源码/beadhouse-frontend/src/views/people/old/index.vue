@@ -10,7 +10,7 @@
     >
       <!-- 表格 header 按钮 -->
       <template #tableHeader>
-        <el-button class="bg-blue" @click="exportExcelData" type="primary">
+        <el-button class="bg-blue" @click="exportExcelData" :loading="exporting" type="primary">
           <IconPark :icon="Download" class="mr-1"></IconPark>
           <span>导出</span>
         </el-button>
@@ -50,7 +50,9 @@
 </template>
 
 <script setup lang="ts" name="useProTable">
-import { ref, reactive } from "vue";
+import { onBeforeUnmount, ref, reactive } from "vue";
+import type { ResourceSession } from "@/utils/authResource";
+import { captureResourceSession, isResourceSessionCurrent } from "@/utils/authResource";
 import { ElMessage } from "element-plus";
 import oldDialog from "./oldDialog/index.vue";
 import { Download } from "@icon-park/vue-next";
@@ -76,19 +78,45 @@ const dataCallback = (data: any) => {
 
 // 如果你想在请求之前对当前请求参数做一些操作，可以自定义如下函数：params 为当前所有的请求参数（包括分页），最后返回请求列表接口
 // 默认不做操作就直接在 ProTable 组件上绑定	:requestApi="getUserList"
-const getTableList = (params: any) => {
+const getTableList = (params: any, session?: ResourceSession) => {
   let newParams = JSON.parse(JSON.stringify(params));
-  return pageElderByKey(newParams);
+  return pageElderByKey(newParams, session);
 };
 
-// 导出Excel
+// Export stays within the captured account and never writes a publicly accessible file.
+const exporting = ref(false);
+const exportUrls = new Map<string, number>();
+let exportAlive = true;
+function releaseExport(url: string) {
+  window.clearTimeout(exportUrls.get(url));
+  exportUrls.delete(url);
+  URL.revokeObjectURL(url);
+}
+onBeforeUnmount(() => {
+  exportAlive = false;
+  Array.from(exportUrls.keys()).forEach(releaseExport);
+});
 const exportExcelData = async () => {
-  const res:any = await exportExcel()
-  const anchor = document.createElement("a"); // create the anchor element
-  anchor.href = res.data;
-  anchor.click()
-  anchor.remove()
-  responseHint(res)
+  if (exporting.value) return;
+  exporting.value = true;
+  try {
+    const session = captureResourceSession();
+    const blob = await exportExcel(session);
+    if (!exportAlive || !isResourceSessionCurrent(session)) return;
+    const url = URL.createObjectURL(blob);
+    // Keep the Blob alive long enough for browsers to start the download, then release it.
+    exportUrls.set(url, window.setTimeout(() => releaseExport(url), 1000));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "长者档案.xlsx";
+    document.body.appendChild(anchor);
+    try { anchor.click(); } finally { anchor.remove(); }
+    ElMessage.success("导出文件已生成");
+  } catch (error: any) {
+    if (exportAlive) ElMessage.error(error?.msg || error?.message || "导出失败，请重试");
+  } finally {
+    if (exportAlive) exporting.value = false;
+  }
 };
 
 // 删除
