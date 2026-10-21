@@ -62,6 +62,9 @@ test('the real Tailwind 4 entry preserves project colors, variants, nesting and 
   const result = await postcss([tailwindPostcss({ base: frontend, optimize: { minify: false } })])
     .process(input, { from: sourcePath });
   assert.deepEqual(result.warnings(), []);
+  const outsideSourceUtility = 'p-[879px]';
+  assert.ok(result.css.includes('.mx-1'), 'Actual source classes must be discovered without inline safelisting');
+  assert.ok(!result.css.includes('879px'), `${outsideSourceUtility} in test tooling must not enter application CSS`);
   function ruleFor(candidate) {
     const selector = `.${candidate.replace(/[^a-zA-Z0-9_-]/g, char => `\\${char}`)}`;
     const matches = [];

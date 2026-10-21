@@ -1,7 +1,9 @@
 /* 保持原有未分层的样式顺序，使工具类仍可覆盖组件样式。 */
 @import 'tailwindcss/theme.css';
 @import 'tailwindcss/preflight.css';
-@import 'tailwindcss/utilities.css';
+@import 'tailwindcss/utilities.css' source(none);
+/* 只扫描应用源码，避免隔离副本的父目录、工具与运行数据进入自动探测。 */
+@source '../';
 @config '../../tailwind.config.js';
 
 /* 保留现有页面使用的 Tailwind 3 色值。 */

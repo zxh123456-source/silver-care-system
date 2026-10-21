@@ -19,6 +19,10 @@ from playwright.sync_api import expect, sync_playwright
 
 
 def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list[str]:
+    entry_script = re.search(r'<script\b[^>]*\bsrc="([^"]+)"', (dist / "index.html").read_text(encoding="utf-8"))
+    assert entry_script, "Built frontend entry script is missing"
+    entry_path = urllib.parse.urlparse(entry_script.group(1)).path
+
     class Handler(SimpleHTTPRequestHandler):
         def log_message(self, *args):
             pass
@@ -239,8 +243,8 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
                 assert fetched[-1].request.headers.get("token")
                 assert "token=" not in fetched[-1].url and "no-store" in fetched[-1].headers.get("cache-control", "")
                 assert admin.request.get(origin + image_url).status == 401
-                # Element Plus reports this known before-upload validation rejection itself.
-                allow_console_once("admin", r"/js/chunk-vendors\.[^/]+\.js", r"Error: 图片内容无效(?:\n[^\n]*)+")
+                # Element Plus reports this known upload rejection from the built entry bundle.
+                allow_console_once("admin", re.escape(entry_path), r"Error: 图片内容无效(?:\n[^\n]*)+")
                 with admin.expect_response(lambda response: "/api/file/uploadImg" in response.url) as invalid_image:
                     editor.locator("input[type=file]").set_input_files({"name": "forged.png", "mimeType": "image/png", "buffer": b"<html>not a picture</html>"})
                 assert invalid_image.value.json()["code"] == 400
