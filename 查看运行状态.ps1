@@ -36,19 +36,19 @@ foreach ($service in @('mysql','redis','etcd','minio','milvus')) {
     $checks.Add(@{name="$service-container";healthy=[bool]$healthy})
 }
 $probes=@{
-    'milvus-http'={ (Invoke-WebRequest "http://127.0.0.1:$($ports.MilvusHealthPort)/healthz" -TimeoutSec 5).StatusCode -eq 200 }
+    'milvus-http'={ (Invoke-WebRequest -NoProxy "http://127.0.0.1:$($ports.MilvusHealthPort)/healthz" -TimeoutSec 5).StatusCode -eq 200 }
     'rag-diagnostics'={
-        $health=Invoke-RestMethod "http://127.0.0.1:$($ports.RagPort)/health" -TimeoutSec 5
-        $diagnostic=Invoke-RestMethod "http://127.0.0.1:$($ports.RagPort)/v2/diagnostics" -Headers @{'X-Internal-Token'=$env:AI_RAG_INTERNAL_TOKEN} -TimeoutSec 5
+        $health=Invoke-RestMethod -NoProxy "http://127.0.0.1:$($ports.RagPort)/health" -TimeoutSec 5
+        $diagnostic=Invoke-RestMethod -NoProxy "http://127.0.0.1:$($ports.RagPort)/v2/diagnostics" -Headers @{'X-Internal-Token'=$env:AI_RAG_INTERNAL_TOKEN} -TimeoutSec 5
         $health.status -eq 'ok' -and $health.instance_id -eq $state.instanceId -and -not $health.degraded -and $diagnostic.backend -eq 'milvus-hybrid' -and $diagnostic.embedding_loaded -and $diagnostic.model.name -eq 'BAAI/bge-small-zh-v1.5' -and $diagnostic.dimension -eq 512 -and @($diagnostic.model.onnx_files).Count -gt 0 -and -not $diagnostic.degraded -and (Test-LifecycleAuthorization "http://127.0.0.1:$($ports.RagPort)/v2/diagnostics")
     }
     'backend-http'={
-        $api=Invoke-RestMethod "http://127.0.0.1:$($ports.BackendPort)/v2/api-docs" -TimeoutSec 5
+        $api=Invoke-RestMethod -NoProxy "http://127.0.0.1:$($ports.BackendPort)/v2/api-docs" -TimeoutSec 5
         $api.swagger -eq '2.0' -and $null -ne $api.paths.'/ai/daily/overview' -and (Test-LifecycleAuthorization "http://127.0.0.1:$($ports.BackendPort)/ai/daily/overview")
     }
     'frontend-proxy'={
-        $page=Invoke-WebRequest "http://127.0.0.1:$($ports.FrontendPort)/" -TimeoutSec 5
-        $api=Invoke-RestMethod "http://127.0.0.1:$($ports.FrontendPort)/api/v2/api-docs" -TimeoutSec 5
+        $page=Invoke-WebRequest -NoProxy "http://127.0.0.1:$($ports.FrontendPort)/" -TimeoutSec 5
+        $api=Invoke-RestMethod -NoProxy "http://127.0.0.1:$($ports.FrontendPort)/api/v2/api-docs" -TimeoutSec 5
         $page.StatusCode -eq 200 -and $page.Content -match '<div id="app"' -and $api.swagger -eq '2.0' -and $null -ne $api.paths.'/ai/daily/overview' -and (Test-LifecycleAuthorization "http://127.0.0.1:$($ports.FrontendPort)/api/ai/daily/overview")
     }
 }

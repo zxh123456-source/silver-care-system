@@ -144,7 +144,7 @@ try {
                 $LASTEXITCODE -eq 0 -and $health -eq 'healthy'
             }
         }
-        Wait-LifecycleCondition -TimeoutSeconds $TimeoutSeconds -Description 'Milvus HTTP' -Condition { (Invoke-WebRequest "http://127.0.0.1:$($ports.MilvusHealthPort)/healthz" -TimeoutSec 5).StatusCode -eq 200 }
+        Wait-LifecycleCondition -TimeoutSeconds $TimeoutSeconds -Description 'Milvus HTTP' -Condition { (Invoke-WebRequest -NoProxy "http://127.0.0.1:$($ports.MilvusHealthPort)/healthz" -TimeoutSec 5).StatusCode -eq 200 }
         Wait-LifecycleCondition -TimeoutSeconds $TimeoutSeconds -Description 'Milvus 认证连接' -Condition {
             & $python -c 'import os; from pymilvus import MilvusClient; c=MilvusClient(uri=os.environ["RAG_MILVUS_URI"],token=os.environ["RAG_MILVUS_TOKEN"],timeout=5); c.list_collections(timeout=5); c.close()' 2>$null | Out-Null
             $LASTEXITCODE -eq 0
@@ -167,17 +167,17 @@ try {
         }
         Write-Host '等待真实 HTTP、BGE 模型、Milvus 和前端代理健康检查。'
         Wait-LifecycleCondition -TimeoutSeconds $TimeoutSeconds -Description 'RAG BGE + Milvus 认证诊断' -Condition {
-            $health=Invoke-RestMethod "http://127.0.0.1:$($ports.RagPort)/health" -TimeoutSec 5
-            $diagnostic=Invoke-RestMethod "http://127.0.0.1:$($ports.RagPort)/v2/diagnostics" -Headers @{'X-Internal-Token'=$env:RAG_INTERNAL_TOKEN} -TimeoutSec 5
+            $health=Invoke-RestMethod -NoProxy "http://127.0.0.1:$($ports.RagPort)/health" -TimeoutSec 5
+            $diagnostic=Invoke-RestMethod -NoProxy "http://127.0.0.1:$($ports.RagPort)/v2/diagnostics" -Headers @{'X-Internal-Token'=$env:RAG_INTERNAL_TOKEN} -TimeoutSec 5
             $health.status -eq 'ok' -and $health.instance_id -eq $state.instanceId -and -not $health.degraded -and $diagnostic.backend -eq 'milvus-hybrid' -and $diagnostic.embedding_loaded -and $diagnostic.embedding_backend -eq 'BAAI/bge-small-zh-v1.5' -and $diagnostic.dimension -eq 512 -and $diagnostic.model.name -eq 'BAAI/bge-small-zh-v1.5' -and @($diagnostic.model.onnx_files).Count -gt 0 -and -not $diagnostic.degraded -and (Test-LifecycleAuthorization "http://127.0.0.1:$($ports.RagPort)/v2/diagnostics")
         }
         Wait-LifecycleCondition -TimeoutSeconds $TimeoutSeconds -Description '后端 HTTP API' -Condition {
-            $api=Invoke-RestMethod "http://127.0.0.1:$($ports.BackendPort)/v2/api-docs" -TimeoutSec 5
+            $api=Invoke-RestMethod -NoProxy "http://127.0.0.1:$($ports.BackendPort)/v2/api-docs" -TimeoutSec 5
             $api.swagger -eq '2.0' -and $null -ne $api.paths.'/ai/daily/overview' -and (Test-LifecycleAuthorization "http://127.0.0.1:$($ports.BackendPort)/ai/daily/overview")
         }
         Wait-LifecycleCondition -TimeoutSeconds $TimeoutSeconds -Description '前端页面及后端代理' -Condition {
-            $page=Invoke-WebRequest "http://127.0.0.1:$($ports.FrontendPort)/" -TimeoutSec 5
-            $api=Invoke-RestMethod "http://127.0.0.1:$($ports.FrontendPort)/api/v2/api-docs" -TimeoutSec 5
+            $page=Invoke-WebRequest -NoProxy "http://127.0.0.1:$($ports.FrontendPort)/" -TimeoutSec 5
+            $api=Invoke-RestMethod -NoProxy "http://127.0.0.1:$($ports.FrontendPort)/api/v2/api-docs" -TimeoutSec 5
             $page.StatusCode -eq 200 -and $page.Content -match '<div id="app"' -and $api.swagger -eq '2.0' -and $null -ne $api.paths.'/ai/daily/overview' -and (Test-LifecycleAuthorization "http://127.0.0.1:$($ports.FrontendPort)/api/ai/daily/overview")
         }
         foreach ($name in @('rag','backend','frontend')) {

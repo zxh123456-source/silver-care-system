@@ -5,6 +5,7 @@ Run with Python 3.10+ and PowerShell 7 on Windows:
 Only processes created by these tests are terminated.
 """
 import json
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import os
 from pathlib import Path
 import shutil
@@ -12,6 +13,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 import venv
 from unittest import mock
@@ -729,6 +731,114 @@ $answer=@{failed=$failed;state=(Read-LifecycleState -Path $path -ProjectRoot $en
         self.assertEqual(answer["events"], ["create", "start", "create", "start"])
         self.assertEqual([item["Id"] for item in answer["live"]], ["a" * 64, "b" * 64])
         self.assertTrue(all(item["running"] for item in answer["state"]["containers"]))
+
+    def test_local_http_probes_ignore_inherited_proxy_without_changing_environment(self):
+        proxy_requests = []
+
+        class Target(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                status, content_type = 200, "application/json"
+                if self.path in ("/protected-401", "/ai/daily/overview", "/api/ai/daily/overview"):
+                    status, value = 401, {"code": 401}
+                elif self.path == "/protected-403":
+                    status, value = 403, {"code": 403}
+                elif self.path == "/v2/diagnostics":
+                    if self.headers.get("X-Internal-Token") != "fixture-token":
+                        status, value = 401, {"code": 401}
+                    else:
+                        value = {"backend": "milvus-hybrid", "embedding_loaded": True,
+                                 "embedding_backend": "BAAI/bge-small-zh-v1.5", "dimension": 512,
+                                 "model": {"name": "BAAI/bge-small-zh-v1.5", "onnx_files": ["fixture.onnx"]},
+                                 "degraded": False}
+                elif self.path == "/health":
+                    value = {"status": "ok", "instance_id": "fixture-instance", "degraded": False}
+                elif self.path in ("/v2/api-docs", "/api/v2/api-docs"):
+                    value = {"swagger": "2.0", "paths": {"/ai/daily/overview": {}}}
+                elif self.path == "/":
+                    value, content_type = '<div id="app"></div>', "text/html"
+                else:
+                    value = {"status": "ok"}
+                body = (value if isinstance(value, str) else json.dumps(value)).encode("utf-8")
+                self.send_response(status)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        class RejectingProxy(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                proxy_requests.append(self.path)
+                self.send_response(502)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+        target = ThreadingHTTPServer(("127.0.0.1", 0), Target)
+        proxy = ThreadingHTTPServer(("127.0.0.1", 0), RejectingProxy)
+        threads = [threading.Thread(target=server.serve_forever, daemon=True) for server in (target, proxy)]
+        for thread in threads:
+            thread.start()
+        try:
+            proxy_url = f"http://127.0.0.1:{proxy.server_port}"
+            with mock.patch.dict(os.environ, {"HTTP_PROXY": proxy_url, "HTTPS_PROXY": proxy_url}):
+                os.environ.pop("NO_PROXY", None)
+                os.environ.pop("no_proxy", None)
+                answer = self.result("""
+$proxyBefore=$env:HTTP_PROXY
+$ports=@{MilvusHealthPort=[int]$env:SC_HTTP_PORT;RagPort=[int]$env:SC_HTTP_PORT;BackendPort=[int]$env:SC_HTTP_PORT;FrontendPort=[int]$env:SC_HTTP_PORT}
+$state=@{instanceId='fixture-instance'}
+$env:AI_RAG_INTERNAL_TOKEN='fixture-token'; $env:RAG_INTERNAL_TOKEN='fixture-token'
+$baseUrl="http://127.0.0.1:$env:SC_HTTP_PORT"
+$control=Invoke-WebRequest "$baseUrl/public" -TimeoutSec 5 -SkipHttpErrorCheck
+$tokens=$null; $errors=$null
+$statusTree=[Management.Automation.Language.Parser]::ParseFile($env:SC_STATUS,[ref]$tokens,[ref]$errors)
+if($errors.Count){throw 'Invalid status entry point'}
+$declaration=$statusTree.Find({param($item)
+    $item -is [Management.Automation.Language.AssignmentStatementAst] -and
+    $item.Left -is [Management.Automation.Language.VariableExpressionAst] -and
+    $item.Left.VariablePath.UserPath -eq 'probes'
+},$true)
+if(-not $declaration){throw 'Missing actual status probes'}
+. ([scriptblock]::Create($declaration.Extent.Text))
+$statusResults=@{}
+foreach($name in $probes.Keys){try{$statusResults[$name]=[bool](& $probes[$name])}catch{$statusResults[$name]=$false}}
+$startupTree=[Management.Automation.Language.Parser]::ParseFile($env:SC_STARTUP,[ref]$tokens,[ref]$errors)
+if($errors.Count){throw 'Invalid startup entry point'}
+$conditions=@($startupTree.FindAll({param($item)
+    $item -is [Management.Automation.Language.ScriptBlockExpressionAst] -and
+    $item.Extent.Text -match 'Invoke-(WebRequest|RestMethod)'
+},$true))
+$startupResults=@(foreach($condition in $conditions){try{& $condition.ScriptBlock.GetScriptBlock()}catch{$false}})
+$answer=@{control=[int]$control.StatusCode;status=$statusResults;startup=$startupResults;
+    unauthorized=(Test-LifecycleAuthorization "$baseUrl/protected-401");
+    forbidden=(Test-LifecycleAuthorization "$baseUrl/protected-403");
+    public=(Test-LifecycleAuthorization "$baseUrl/public");
+    nonlocal=(Test-LifecycleAuthorization 'http://proxy-check.invalid/should-use-proxy');
+    proxyUnchanged=($env:HTTP_PROXY -ceq $proxyBefore);noProxyAbsent=(-not(Test-Path Env:NO_PROXY))}
+""", extra={"SC_HTTP_PORT": target.server_port, "SC_STATUS": ROOT / "查看运行状态.ps1",
+                                    "SC_STARTUP": ROOT / "启动AI养老院.ps1"})
+            self.assertEqual(answer["control"], 502, "The rejecting proxy must actually intercept ordinary local requests")
+            self.assertEqual(set(answer["status"]), {"milvus-http", "rag-diagnostics", "backend-http", "frontend-proxy"})
+            self.assertTrue(all(answer["status"].values()), answer["status"])
+            self.assertEqual(answer["startup"], [True] * 4)
+            self.assertTrue(answer["unauthorized"])
+            self.assertTrue(answer["forbidden"])
+            self.assertFalse(answer["public"], "A successful public response is not authorization enforcement")
+            self.assertFalse(answer["nonlocal"])
+            self.assertTrue(answer["proxyUnchanged"] and answer["noProxyAbsent"])
+            self.assertEqual(len(proxy_requests), 2, "Only the control and non-local requests may use the configured proxy")
+            self.assertTrue(any("proxy-check.invalid" in request for request in proxy_requests))
+        finally:
+            for server in (target, proxy):
+                server.shutdown()
+                server.server_close()
+            for thread in threads:
+                thread.join(timeout=5)
 
     def test_frontend_entry_runs_vite_with_the_requested_loopback_port(self):
         frontend = self.root / "源码/beadhouse-frontend"

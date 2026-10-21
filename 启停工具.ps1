@@ -162,7 +162,7 @@ function Test-ContainerPublishedPort($Identity, [string]$DockerPath, [int]$HostP
 }
 
 function Test-LifecycleAuthorization([string]$Url) {
-    $response=Invoke-WebRequest $Url -TimeoutSec 5 -SkipHttpErrorCheck
+    $response=Invoke-WebRequest $Url -NoProxy:(([uri]$Url).IsLoopback) -TimeoutSec 5 -SkipHttpErrorCheck
     return $response.StatusCode -eq 401 -or $response.StatusCode -eq 403
 }
 

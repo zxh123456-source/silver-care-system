@@ -199,3 +199,35 @@ test('bed portraits retain male, female and fallback asset branches with static 
   assert.equal(api.getImgUrl(''), images['@/assets/imgs/img_2.png']);
   assert.equal(api.getImgUrl('其他'), images['@/assets/imgs/img_2.png']);
 });
+
+
+test('cold Vite starts with lazy-page Element Plus styles registered before discovery', () => {
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', `
+    import assert from 'node:assert/strict';
+    import { createServer } from 'vite';
+    import { mkdtemp, rm, realpath } from 'node:fs/promises';
+    import { tmpdir } from 'node:os';
+    import path from 'node:path';
+    const cache = await mkdtemp(path.join(tmpdir(), 'silvercare-vite-crawl-'));
+    let server;
+    try {
+      server = await createServer({ root: process.cwd(), cacheDir: cache,
+        optimizeDeps: { noDiscovery: true }, server: { middlewareMode: true }, logLevel: 'error' });
+      const optimizer = server.environments.client.depsOptimizer;
+      assert.ok(optimizer, 'Cold-start dependency optimization must be enabled');
+      await optimizer.init();
+      const known = { ...optimizer.metadata.optimized, ...optimizer.metadata.discovered };
+      for (const component of ['alert', 'table-column', 'table', 'empty', 'radio']) {
+        const id = 'element-plus/es/components/' + component + '/style/css';
+        assert.ok(known[id], 'Lazy page must not discover a new style after login: ' + id);
+      }
+    } finally {
+      if (server) await server.close();
+      assert.equal(path.dirname(await realpath(cache)), await realpath(tmpdir()));
+      assert.ok(path.basename(cache).startsWith('silvercare-vite-crawl-'));
+      await rm(cache, { recursive: true });
+    }
+  `], { cwd: process.env.FRONTEND_TEST_DEPENDENCIES || path.join(__dirname, '..'),
+    encoding: 'utf8', timeout: 120000, windowsHide: true });
+  assert.equal(result.status, 0, result.stderr || result.error?.message);
+});
