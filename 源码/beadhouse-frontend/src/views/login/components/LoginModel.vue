@@ -44,7 +44,7 @@
             <div class="password-set">
               <el-button
                 link
-                @click="this.$emit('forgetPassHandle')"
+                @click="$emit('forgetPassHandle')"
               >
                 忘记密码
               </el-button>
@@ -94,7 +94,7 @@ const loading = ref(false)
 const handleLogin = async (formRef: FormInstance | null) => {
   loading.value = true
   if (!formRef) { loading.value = false; return }
-  formRef.validate((valid, fields) => {
+  formRef.validate((valid) => {
     if (valid) {
       //单独校验图形验证码
       if (imgCode.value == formData.value.verifyCode) {
@@ -136,7 +136,7 @@ const handleLogin = async (formRef: FormInstance | null) => {
       }
     } else {
       loading.value = false
-      return fields
+      return
     }
   })
 }

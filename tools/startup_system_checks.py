@@ -171,12 +171,12 @@ def run(manifest_path, phase):
             "$items | Sort-Object {if($_.name -eq 'frontend'){0}else{1}} | ForEach-Object {Stop-OwnedProcess $_}"],
             env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=45)
         assert stopped.returncode == 0, "Could not stop this copy's frontend for the partial repair test"
-        vue_config = project / "源码/beadhouse-frontend/vue.config.js"
-        original = vue_config.read_bytes()
+        vite_config = project / "源码/beadhouse-frontend/vite.config.mts"
+        original = vite_config.read_bytes()
         frontend_error = project / f'.runtime/logs/{manifest["composeProject"]}/frontend.err.log'
         frontend_error.write_bytes(b"")
         try:
-            vue_config.write_bytes(b"throw new Error('synthetic partial repair failure');\n" + original)
+            vite_config.write_bytes(b"throw new Error('synthetic partial repair failure');\n" + original)
             failed = direct("start", timeout=20)
             (manifest_path.parent / "fault-partial-repair.log").write_bytes(failed.stdout)
             assert failed.returncode != 0
@@ -189,7 +189,7 @@ def run(manifest_path, phase):
                 with opener.open(f'http://127.0.0.1:{manifest["ports"][key]}{path}', timeout=5) as response:
                     assert json.load(response)[field] == expected
         finally:
-            vue_config.write_bytes(original)
+            vite_config.write_bytes(original)
         record("failed frontend repair preserved exact running Java/RAG identities and all five container IDs, confirmed by live HTTP")
         invoke(manifest, "start", manifest_path)
         invoke(manifest, "status", manifest_path)
@@ -227,14 +227,14 @@ def run(manifest_path, phase):
         record("foreign listener caused preflight rejection and was left running; no infrastructure was started")
 
         # A genuine application failure after infrastructure startup exercises rollback.
-        vue_config = project / "源码/beadhouse-frontend/vue.config.js"
-        original_vue = vue_config.read_bytes()
+        vite_config = project / "源码/beadhouse-frontend/vite.config.mts"
+        original_vite = vite_config.read_bytes()
         old_process_keys = set(observed_processes)
         frontend_error = project / f'.runtime/logs/{manifest["composeProject"]}/frontend.err.log'
         if frontend_error.exists():
             frontend_error.write_bytes(b"")
         try:
-            vue_config.write_bytes(b"throw new Error('synthetic startup acceptance failure');\n" + original_vue)
+            vite_config.write_bytes(b"throw new Error('synthetic startup acceptance failure');\n" + original_vite)
             result = direct("start", timeout=20)
             (manifest_path.parent / "fault-frontend-rollback.log").write_bytes(result.stdout)
             assert result.returncode != 0, "Faulty frontend unexpectedly passed health checks"
@@ -244,7 +244,7 @@ def run(manifest_path, phase):
             assert {"rag", "backend"}.issubset(new_names), "Did not observe the new applications that rollback must stop"
             assert_stopped(state())
         finally:
-            vue_config.write_bytes(original_vue)
+            vite_config.write_bytes(original_vite)
         record("real frontend startup failure rolled back newly started applications and containers")
         invoke(manifest, "start", manifest_path)
         invoke(manifest, "status", manifest_path)

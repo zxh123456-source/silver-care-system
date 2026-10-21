@@ -168,13 +168,13 @@ const formData = ref<any>({
 });
 
 // 添加菜品
-const addDishes = (dishesList: any) => {
+const addDishes = (dishesList: any[]) => {
   // 初始化Array
   formData.value.dishesIdList = initArray(formData.value.dishesIdList);
   formData.value.setDishesVoList = initArray(formData.value.setDishesVoList);
 
   // 传入所有对象
-  dishesList.value.forEach((dishes: any) => {
+  dishesList.forEach((dishes: any) => {
     dishes.name = dishes.typeName;
     formData.value.setDishesVoList.push(dishes);
   });

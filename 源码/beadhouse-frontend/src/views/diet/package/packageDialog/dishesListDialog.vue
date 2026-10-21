@@ -34,7 +34,7 @@ const dialogVisible = ref(false);
 // 获取 ProTable 元素，调用其获取刷新数据方法（还能获取到当前查询参数，方便导出携带参数）
 const proTable = ref();
 const initParam = reactive({});
-const dishesList = ref<any>([]);
+const dishesList = ref<any[]>([]);
 
 // 获取选择的数据
 const operateDishes = (selection: any) => {
@@ -43,10 +43,10 @@ const operateDishes = (selection: any) => {
 
 // 确认数据
 const emit = defineEmits<{
-  (event: "addDishes", val: any): void
+  (event: "addDishes", val: any[]): void
 }>();
 const confirmData = () => {
-  emit("addDishes", dishesList);
+  emit("addDishes", dishesList.value);
   dialogVisible.value = false;
 };
 

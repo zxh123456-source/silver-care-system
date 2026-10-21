@@ -22,7 +22,7 @@
                     <el-button
                       @click="openDrawer"
                       :icon="Plus"
-                      :style="{cursor: (drawerProps.title !== '新增' ? not-allowed : cursor)}"
+                      :style="{cursor: (drawerProps.title !== '新增' ? 'not-allowed' : 'pointer')}"
                       :disabled="drawerProps.title !== '新增'"
                     />
                   </template>

@@ -1,4 +1,5 @@
 import { TableColumnCtx } from "element-plus/es/components/table/src/table-column/defaults";
+import type { DefaultRow } from "element-plus/es/components/table/src/table/defaults";
 import { BreakPoint, Responsive } from "@/components/Grid/interface";
 
 export interface EnumProps {
@@ -35,7 +36,7 @@ export type SearchProps = {
   defaultValue?: string | number | boolean | any[] // 搜索项默认值
 } & Partial<Record<BreakPoint, Responsive>>
 
-export interface ColumnProps<T = any>
+export interface ColumnProps<T extends DefaultRow = any>
   extends Partial<Omit<TableColumnCtx<T>, "children" | "renderHeader" | "renderCell">> {
   tag?: boolean; // 是否是标签展示
   isShow?: boolean; // 是否显示在表格当中

@@ -87,7 +87,7 @@ try {
     }
     $aiDir=Join-Path $projectRoot '源码/beadhouse-ai'; $backendDir=Join-Path $projectRoot '源码/beadhouse-backend'; $frontendDir=Join-Path $projectRoot '源码/beadhouse-frontend'
     $python=Get-WindowsToolPath (Join-Path $aiDir '.venv/Scripts/python.exe'); $jar=Join-Path $backendDir 'target/beadhouse-backend-0.0.1-SNAPSHOT.jar'
-    $vue=Join-Path $frontendDir 'node_modules/@vue/cli-service/bin/vue-cli-service.js'
+    $vite=Join-Path $frontendDir 'node_modules/vite/bin/vite.js'
     Invoke-LifecycleCommand $java @('-version') $backendDir (Join-Path $logDir 'java-version.log')
     $javaVersion=(Get-Content -LiteralPath (Join-Path $logDir 'java-version.log') -Raw) + (Get-Content -LiteralPath (Join-Path $logDir 'java-version.log.stderr') -Raw)
     if ($javaVersion -notmatch 'version "1\.8\.') { throw '本项目要求 JDK 8；请设置 JAVA_HOME 或 SILVERCARE_JAVA。' }
@@ -118,7 +118,7 @@ try {
             throw "AI 依赖安装失败：$($_.Exception.Message) 如日志出现 Windows 路径过长，请将项目放在更短路径（保留本项目现有数据）；脚本会优先使用可用的工具短路径，不修改系统设置。"
         }
     }
-    foreach ($artifact in @($python,$jar,$vue)) { if (-not (Test-Path -LiteralPath $artifact)) { throw '缺少构建产物或依赖；请先使用 -Prepare。' } }
+    foreach ($artifact in @($python,$jar,$vite)) { if (-not (Test-Path -LiteralPath $artifact)) { throw '缺少构建产物或依赖；请先使用 -Prepare。' } }
     Invoke-LifecycleCommand $python @('-c','import sys, uvicorn, fastembed, pymilvus; assert sys.version_info[:2] == (3,12), "Python 3.12 required"') $aiDir (Join-Path $logDir 'python-check.log')
     $state.processes=$liveProcesses; $state.ports=$ports; $state.configurationFingerprint=$fingerprint
     Save-LifecycleState $state $config.statePath
@@ -161,7 +161,7 @@ try {
             $launch=switch ($name) {
                 rag { @{file=$python;arguments=@('-m','uvicorn','app.main:app','--app-dir',$aiDir,'--host','127.0.0.1','--port',[string]$ports.RagPort);directory=$aiDir} }
                 backend { @{file=$java;arguments=@('-jar',$jar,"--server.port=$($ports.BackendPort)",'--server.address=127.0.0.1',"--filesave.windows=$uploadDir","--filesave.linux=$uploadDir");directory=$backendDir} }
-                frontend { @{file=$node;arguments=@($vue,'serve','--host','127.0.0.1','--port',[string]$ports.FrontendPort);directory=$frontendDir} }
+                frontend { @{file=$node;arguments=@($vite,'--host','127.0.0.1','--port',[string]$ports.FrontendPort);directory=$frontendDir} }
             }
             Start-LifecycleProcess $name $launch.file $launch.arguments $launch.directory $projectRoot $logDir -OnIdentity $checkpointIdentity | Out-Null
         }

@@ -17,7 +17,7 @@ const EDITOR = 'views/people/old/oldDialog/index.vue', SELECTOR = 'components/el
 // Run the shipped TypeScript, Vue setup, reactivity and Axios transform pipeline.
 // DOM widgets, chart rendering and the HTTP adapter are the boundaries.
 function fixture() {
-  const values = new Map(), listeners = new Map(), modules = new Map();
+  const values = new Map(), listeners = new Map(), modules = new Map(), overrides = new Map();
   const messages = [], dispatches = [], requests = [], charts = [], logs = [], validationErrors = [];
   const localStorage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, String(value)), removeItem: key => values.delete(key) };
   const store = { state: vue.reactive({ app: { token: 'session-a', userPeofile: { userid: 4, username: 'fixture', avator: '' } } }),
@@ -27,9 +27,11 @@ function fixture() {
     removeEventListener(name, fn) { listeners.get(name)?.delete(fn); } };
   const message = value => messages.push(value);
   for (const name of ['error', 'success', 'warning', 'info']) message[name] = message;
+  let prompt = async () => { throw new Error('Unexpected prompt'); };
   let active;
   const lifecycleVue = { ...vue,
     onMounted(fn) { active.mounted.push(fn); },
+    onActivated(fn) { active.activated.push(fn); },
     onBeforeUnmount(fn) { active.unmounted.push(fn); },
     onUnmounted(fn) { active.unmounted.push(fn); } };
   const echarts = { init(element) {
@@ -39,10 +41,11 @@ function fixture() {
     charts.push(chart); return chart;
   } };
   function dependency(name) {
+    if (overrides.has(name)) return overrides.get(name);
     if (name === 'vue') return lifecycleVue;
     if (name === 'echarts') return echarts;
     if (name === '@/store') return { default: store, __esModule: true };
-    if (name === 'element-plus') return { ElMessage: message, ElMessageBox: { confirm: async () => true } };
+    if (name === 'element-plus') return { ElMessage: message, ElMessageBox: { confirm: async () => true, prompt: (...args) => prompt(...args) } };
     if (name === '@/utils') return { http: load('utils/http/index').default };
     if (name === '@/hooks/useIcons') return { useRenderIcon() {} };
     if (name === '@/utils/formRules' || name === '@element-plus/icons-vue' || name.endsWith('.vue')) return {};
@@ -65,7 +68,7 @@ function fixture() {
     return module.exports;
   }
   function lifecycle(run) {
-    const previous = active, hooks = { mounted: [], unmounted: [] }, scope = vue.effectScope(); active = hooks;
+    const previous = active, hooks = { mounted: [], activated: [], unmounted: [] }, scope = vue.effectScope(); active = hooks;
     let value;
     try { value = scope.run(run); } finally { active = previous; }
     let disposed = false;
@@ -73,14 +76,14 @@ function fixture() {
       if (!disposed) { disposed = true; hooks.unmounted.forEach(fn => fn()); scope.stop(); }
     } };
   }
-  function component(relative) {
+  function component(relative, exposed) {
     return lifecycle(() => {
       const file = path.join(__dirname, '..', 'src', relative), module = { exports: {} }, emitted = [];
       const source = parse(fs.readFileSync(file, 'utf8')).descriptor.scriptSetup.content;
-      const exported = relative === TREND ? 'Echarts' : relative === AVATAR
+      const exported = exposed || (relative === TREND ? 'Echarts' : relative === AVATAR
         ? 'editPassVisible,editPassShow,handleEditPass,formData,loading,ruleFormRef'
         : relative === EDITOR ? 'acceptParams,handleSubmit,dialogVisible,formData,ruleFormRef,drawerProps'
-          : 'elderAcceptParams,getTableList,checkElder,dialogVisible';
+          : 'elderAcceptParams,getTableList,checkElder,dialogVisible');
       execute(source + '\nmodule.exports={' + exported + '};', file, module,
         { defineExpose() {}, defineEmits: () => (...args) => emitted.push(args) });
       return { ...module.exports, emitted };
@@ -100,7 +103,76 @@ function fixture() {
   } }; }
   return { load, component, http, store, requests, charts, dispatches, messages, logs, validationErrors, validForm, window, listeners,
     persist, event: name => listeners.get(name)?.forEach(fn => fn()), reply: fn => { reply = fn; },
+    stub: (name, value) => overrides.set(name, value), prompt: fn => { prompt = fn; },
     table: api => lifecycle(() => load('hooks/useTable').useTable(api)) };
+}
+
+for (const [parentFile, pickerFile, handler, select, event, listField, idField] of [
+  ['views/diet/package/packageDialog/index.vue', 'views/diet/package/packageDialog/dishesListDialog.vue',
+    'addDishes', 'operateDishes', 'addDishes', 'setDishesVoList', 'dishesIdList'],
+  ['views/diet/order/orderDialog/index.vue', 'views/diet/package/packageDialog/dishesListDialog.vue',
+    'addDishes', 'operateDishes', 'addDishes', 'setDishesVoList', null],
+  ['views/serve/level/levelDialog/index.vue', 'views/serve/level/levelDialog/serviceListDialog.vue',
+    'addService', 'operateService', 'addService', 'nurseGradeServiceVoList', 'serviceIdList']
+]) {
+  test(`selection events carry arrays through the parent form: ${parentFile}`, async () => {
+    const f = fixture(), parent = f.component(parentFile, handler + ',formData');
+    const picker = f.component(pickerFile, select + ',confirmData,acceptParams,dialogVisible');
+    try {
+      await picker.acceptParams();
+      picker[select]([{ id: 7, dishesName: 'first', typeName: 'a', price: 10 },
+        { id: 7, dishesName: 'duplicate', typeName: 'a', price: 10 },
+        { id: 8, dishesName: 'second', typeName: 'b', price: 12, orderNum: 2 }]);
+      picker.confirmData();
+      assert.equal(picker.dialogVisible.value, false);
+      assert.equal(picker.emitted.length, 1);
+      const [name, selected] = picker.emitted[0];
+      assert.equal(name, event);
+      assert.ok(Array.isArray(selected), 'Component events must carry selected rows, not a Vue ref');
+      parent[handler](selected);
+      const rows = parent.formData.value[listField];
+      assert.deepEqual(Array.from(rows, row => row.id), [7, 8], 'Repeated selections must be deduplicated by ID');
+      assert.equal(rows[0].dishesName, 'first');
+      if (idField) assert.deepEqual(Array.from(parent.formData.value[idField]), [7, 8]);
+      else {
+        assert.equal(rows[0].orderNum, 1, 'A newly selected dish defaults to one portion');
+        assert.equal(rows[1].orderNum, 2, 'An explicit portion count must be preserved');
+      }
+      assert.equal(f.requests.length, 0, 'Local selection must not dispatch a write');
+    } finally { picker.unmount(); parent.unmount(); }
+  });
+}
+
+for (const [handler, endpoint, busy] of [
+  ['resolveAlert', '/api/ai/daily/alerts/resolve', 'alertBusy'],
+  ['completeTask', '/api/ai/daily/tasks/complete', 'taskBusy']
+]) {
+  test(`daily prompt cancellation skips writes and confirmation retains the note: ${handler}`, async () => {
+    const f = fixture();
+    // Polling is exercised by the notification contract; keep this test focused on the prompt/write boundary.
+    f.stub('@/utils/careNotifications', { useCareNotifications: () => ({ refresh: async () => {} }) });
+    const c = f.component('views/ai/daily/index.vue', handler + ',' + busy);
+    const row = { id: 7, revision: 3 }, note = ' reviewed note ';
+    try {
+      f.prompt(async () => { throw new Error('User canceled the prompt'); });
+      await c[handler](row);
+      assert.equal(f.requests.length, 0);
+      assert.equal(c[busy].value, false);
+      f.prompt(async (text, title, options) => {
+        assert.notEqual(options.inputValidator(''), true);
+        assert.notEqual(options.inputValidator('a'.repeat(501)), true);
+        assert.equal(options.inputValidator('a'.repeat(500)), true);
+        return { value: note };
+      });
+      f.reply(config => ({ code: 200, data: config.url.endsWith('/overview') ? {} : [] }));
+      await c[handler](row);
+      const writes = f.requests.filter(request => request.method === 'post');
+      assert.equal(writes.length, 1);
+      assert.equal(writes[0].url, endpoint);
+      assert.deepEqual(JSON.parse(writes[0].data), { id: 7, revision: 3, note });
+      assert.equal(c[busy].value, false);
+    } finally { c.unmount(); }
+  });
 }
 
 test('request tickets reject older requests, closed dialogs and mutated captured identity', () => {

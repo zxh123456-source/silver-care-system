@@ -180,7 +180,7 @@ async function alertAction(action: "ack" | "resolve", row: any, note?: string) {
 }
 async function ackAlert(row: any) { await alertAction("ack", row); }
 async function resolveAlert(row: any) {
-  let note = "";
+  let note: string;
   try {
     const result = await ElMessageBox.prompt("请填写人工核对结果和解除依据。", "解除告警", {
       inputValidator: (value: string) => (!!value?.trim() && value.length <= 500) || "请填写1至500字的解除依据"
@@ -224,7 +224,7 @@ async function transferTask() {
   if (await taskAction("transfer", transferRow.value, { targetStaffId: targetStaffId.value })) transferVisible.value = false;
 }
 async function completeTask(row: any) {
-  let note = "";
+  let note: string;
   try {
     const answer = await ElMessageBox.prompt("请填写人工复核结果；原业务仍需单独处理。", "复核完成", {
       inputValidator: (value: string) => (!!value?.trim() && value.length <= 500) || "请填写1至500字的复核结果"

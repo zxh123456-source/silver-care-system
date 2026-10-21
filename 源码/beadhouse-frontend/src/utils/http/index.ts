@@ -1,5 +1,6 @@
 import store from "@/store";
 import baseAxios, { AxiosRequestConfig, AxiosResponse } from "axios";
+import type { AxiosInstance } from "axios";
 import { ElMessage } from "element-plus";
 
 export const baseUrl = "http://127.0.0.1:9001/";
@@ -91,4 +92,41 @@ axios.interceptors.response.use(
   }
 );
 
-export default axios;
+interface HttpResponse<T = any> {
+  code: number;
+  data: T;
+  msg?: string;
+}
+
+// Shared session configs can carry a serializer for any query record. Do not
+// narrow that record from params alone when the config is spread into a request.
+type QueryParams = Record<string, unknown>;
+type ReadRequest = <T = any, R = HttpResponse<T>, D = unknown, P = QueryParams>(
+  url: string, config?: AxiosRequestConfig<D, NoInfer<P>>
+) => Promise<R>;
+type WriteRequest = <T = any, R = HttpResponse<T>, D = unknown, P = QueryParams>(
+  url: string, data?: D, config?: AxiosRequestConfig<D, NoInfer<P>>
+) => Promise<R>;
+type ConfigRequest = <T = any, R = HttpResponse<T>, D = unknown, P = QueryParams>(
+  config: AxiosRequestConfig<D, NoInfer<P>>
+) => Promise<R>;
+type HttpClient = Omit<AxiosInstance, "request" | "get" | "delete" | "head" | "options"
+  | "post" | "put" | "patch" | "postForm" | "putForm" | "patchForm" | "query"> & {
+  <T = any, R = HttpResponse<T>, D = unknown, P = QueryParams>(config: AxiosRequestConfig<D, NoInfer<P>>): Promise<R>;
+  <T = any, R = HttpResponse<T>, D = unknown, P = QueryParams>(url: string, config?: AxiosRequestConfig<D, NoInfer<P>>): Promise<R>;
+  request: ConfigRequest;
+  get: ReadRequest;
+  delete: ReadRequest;
+  head: ReadRequest;
+  options: ReadRequest;
+  post: WriteRequest;
+  put: WriteRequest;
+  patch: WriteRequest;
+  postForm: WriteRequest;
+  putForm: WriteRequest;
+  patchForm: WriteRequest;
+  query: WriteRequest;
+};
+
+// The response interceptor above returns the body, rather than AxiosResponse.
+export default axios as HttpClient;

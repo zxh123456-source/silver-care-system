@@ -1,0 +1,26 @@
+/* 保持原有未分层的样式顺序，使工具类仍可覆盖组件样式。 */
+@import 'tailwindcss/theme.css';
+@import 'tailwindcss/preflight.css';
+@import 'tailwindcss/utilities.css';
+@config '../../tailwind.config.js';
+
+/* 保留现有页面使用的 Tailwind 3 色值。 */
+@theme {
+  --color-blue-400: #60a5fa;
+  --color-blue-50: #eff6ff;
+  --color-green-400: #4ade80;
+  --color-red-400: #f87171;
+  --color-red-600: #dc2626;
+  --color-yellow-400: #facc15;
+  --color-green-500: #22c55e;
+  --color-slate-400: #94a3b8;
+  --color-gray-200: #e5e7eb;
+}
+
+/* Tailwind 3 的默认边框颜色和按钮光标。 */
+*, ::before, ::after, ::backdrop, ::file-selector-button {
+  border-color: var(--color-gray-200, currentColor);
+}
+button:not(:disabled), [role='button']:not(:disabled) {
+  cursor: pointer;
+}

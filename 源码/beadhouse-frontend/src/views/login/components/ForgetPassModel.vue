@@ -151,7 +151,7 @@ const sendCodeHandle = async () => {
 const handleForgetPass = (formRef: FormInstance | null) => {
   loading.value = true
   if (!formRef) return
-  formRef.validate(async (valid, fields) => {
+  formRef.validate(async (valid) => {
     if (valid) {
       const res: any = await forgetPass({
         code: formData.value.verifyCode,
@@ -174,7 +174,7 @@ const handleForgetPass = (formRef: FormInstance | null) => {
       }
     } else {
       loading.value = false
-      return fields
+      return
     }
   })
 }

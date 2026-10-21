@@ -39,8 +39,8 @@ interface IRechargeLedgerPage {
 // 分页查询预存充值
 export async function pageDepositRechargeByKey(data: IPageDepositRechargeByKey) {
   // 因为后台返回的字段与前端表单数据的prop不一样，但是组件封装是需要一样的，所以请求前增加一些这两个字段
-  Reflect.has(data, 'elderName') ? (data.name = data.elderName) : ''
-  Reflect.has(data, 'elderPhone') ? (data.phone = data.elderPhone) : ''
+  if (Reflect.has(data, 'elderName')) data.name = data.elderName
+  if (Reflect.has(data, 'elderPhone')) data.phone = data.elderPhone
   return http.get("/api/depositRecharge/pageDepositRechargeByKey", {
     params: {
       ...data

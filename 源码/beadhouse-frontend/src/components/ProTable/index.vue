@@ -63,7 +63,7 @@
       >
         <!-- 默认插槽 -->
         <slot></slot>
-        <template v-for="item in tableColumns" :key="item">
+        <template v-for="(item, index) in tableColumns" :key="item.prop || item.type || index">
           <!-- selection || index -->
           <el-table-column
             v-bind="item"
@@ -124,11 +124,11 @@
 </template>
 
 <script setup lang="ts" name="ProTable">
-import { ref, watch, computed, provide, onMounted } from 'vue'
+import { ref, watch, computed, provide, onMounted, type Ref } from 'vue'
 import { useTable } from '@/hooks/useTable'
 import { BreakPoint } from '@/components/Grid/interface'
 import { ColumnProps } from '@/components/ProTable/interface'
-import { ElTable, TableProps } from 'element-plus'
+import { TableInstance, TableProps } from 'element-plus'
 import { Refresh, Printer, Operation, Search } from '@element-plus/icons-vue'
 import {
   filterEnum,
@@ -175,7 +175,7 @@ const props = withDefaults(defineProps<ProTableProps>(), {
 const isShowSearch = ref(true)
 
 // 表格 DOM 元素
-const tableRef = ref<InstanceType<typeof ElTable>>()
+const tableRef = ref<TableInstance>()
 
 // 表格多选 Hooks
 const { selectionChange, selectedList, selectedListIds, isSelected } =
@@ -211,7 +211,7 @@ onMounted(() => props.requestAuto && getTableList())
 watch(() => props.initParam, getTableList, { deep: true })
 
 // 接收 columns 并设置为响应式
-const tableColumns = ref<ColumnProps[]>(props.columns)
+const tableColumns = ref(props.columns) as Ref<ColumnProps[]>
 
 // 定义 enumMap 存储 enum 值（避免异步请求无法格式化单元格内容 || 无法填充搜索下拉选择）
 const enumMap = ref(new Map<string, { [key: string]: any }[]>())
@@ -245,7 +245,7 @@ const flatColumnsFunc = (
 }
 
 // flatColumns
-const flatColumns = ref<ColumnProps[]>()
+const flatColumns = ref() as Ref<ColumnProps[]>
 flatColumns.value = flatColumnsFunc(tableColumns.value)
 // 过滤需要搜索的配置项
 const searchColumns = flatColumns.value.filter(item => item.search?.el)

@@ -22,7 +22,7 @@
                     <el-button
                       @click="openElderDrawer"
                       :icon="Plus"
-                      :style="{cursor: (drawerProps.title !== '新增' ? not-allowed : cursor)}"
+                      :style="{cursor: (drawerProps.title !== '新增' ? 'not-allowed' : 'pointer')}"
                       :disabled="drawerProps.title !== '新增'"
                     />
                   </template>
@@ -38,7 +38,7 @@
                 >
                   <el-option
                     clearable
-                    :label="item.name"
+                    :label="item.label"
                     :value="item.value"
                     v-for="item in DineTypeList"
                     :key="item.value"
@@ -214,6 +214,13 @@ const drawerProps = ref<DialogProps>({
   title: ""
 });
 
+interface SelectedDish {
+  id: number;
+  dishesName: string;
+  price: number;
+  orderNum: number;
+}
+
 const formData = ref({
   id: "",
   elderId: "",
@@ -226,7 +233,7 @@ const formData = ref({
     dishesId: "",
     orderNum: ""
   }],
-  setDishesVoList: []
+  setDishesVoList: [] as SelectedDish[]
 });
 
 // 打开选择老人的列表 drawer
@@ -251,13 +258,13 @@ const openDishesDrawer = () => {
 };
 
 // 添加菜品
-const addDishes = (dishesList: any) => {
+const addDishes = (dishesList: SelectedDish[]) => {
   // 初始化Array
   formData.value.orderDishesList = initArray(formData.value.orderDishesList);
   formData.value.setDishesVoList = initArray(formData.value.setDishesVoList);
 
   // 传入所有对象
-  dishesList.value.forEach((dishes: any) => {
+  dishesList.forEach((dishes: any) => {
     dishes.orderNum = dishes.orderNum ? dishes.orderNum : 1;
     formData.value.setDishesVoList.push(dishes);
   });

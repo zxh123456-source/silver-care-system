@@ -1,8 +1,11 @@
 import { IRoute } from "@/router/types";
+import type { Component } from "vue";
 import { Router, RouteRecordRaw } from "vue-router";
 import router from "./index";
 import store from "@/store";
 import { arrayDeduplicationByFiled } from "@/utils/commonUtil";
+
+const viewModules = import.meta.glob<Component>("/src/views/**/*.vue", { import: "default" });
 
 /** 将后端返回的路由转换成生成树形结构 */
 function formatRouteTree(data: IRoute[]) {
@@ -42,7 +45,11 @@ function generateRouter(routeTree: IRoute[]) {
       name: route.name,
       meta: route.meta,
       redirect: route.redirect,
-      component: () => import("@/views/" + route.component), // 注意：views目录下才能引入，否则ts不识别
+      component: () => {
+        const componentPath = route.component.replace(/^\/+/, "").replace(/\.vue$/, "");
+        const load = viewModules[`/src/views/${componentPath}.vue`];
+        return load ? load() : Promise.reject(new Error(`找不到路由组件：${route.component}`));
+      },
       children: []
     };
 

@@ -730,6 +730,45 @@ $answer=@{failed=$failed;state=(Read-LifecycleState -Path $path -ProjectRoot $en
         self.assertEqual([item["Id"] for item in answer["live"]], ["a" * 64, "b" * 64])
         self.assertTrue(all(item["running"] for item in answer["state"]["containers"]))
 
+    def test_frontend_entry_runs_vite_with_the_requested_loopback_port(self):
+        frontend = self.root / "源码/beadhouse-frontend"
+        entry = frontend / "node_modules/vite/bin/vite.js"
+        entry.parent.mkdir(parents=True)
+        # A tiny CLI fixture exercises the actual launcher expression without
+        # downloading dependencies or starting the application or Docker.
+        entry.write_text(
+            "import argparse,json\n"
+            "parser=argparse.ArgumentParser()\n"
+            "parser.add_argument('--host', required=True)\n"
+            "parser.add_argument('--port', type=int, required=True)\n"
+            "print(json.dumps(vars(parser.parse_args())))\n", encoding="utf-8")
+        answer = self.result("""
+$tokens=$null; $errors=$null
+$tree=[Management.Automation.Language.Parser]::ParseFile($env:SC_STARTUP,[ref]$tokens,[ref]$errors)
+if ($errors.Count) { throw 'Invalid startup script' }
+$frontendDir=Join-Path $env:SC_ROOT '源码/beadhouse-frontend'
+$node=$env:SC_PYTHON; $ports=@{FrontendPort=18765}
+$entry=$tree.Find({param($item)
+    $item -is [Management.Automation.Language.AssignmentStatementAst] -and
+    $item.Left -is [Management.Automation.Language.VariableExpressionAst] -and
+    $item.Left.VariablePath.UserPath -in @('vue','vite')
+},$true)
+if (-not $entry) { throw 'Missing frontend CLI entry' }
+. ([scriptblock]::Create($entry.Extent.Text))
+$launchExpression=$tree.Find({param($item)
+    $item -is [Management.Automation.Language.HashtableAst] -and
+    $item.Extent.Text -like '@{file=$node;arguments=*'
+},$true)
+if (-not $launchExpression) { throw 'Missing frontend launch expression' }
+$launch=& ([scriptblock]::Create($launchExpression.Extent.Text))
+$log=Join-Path $env:SC_ROOT 'frontend-arguments.log'
+Invoke-LifecycleCommand $launch.file $launch.arguments $launch.directory $log
+$answer=@{entry=$launch.arguments[0];directory=$launch.directory;arguments=(Get-Content -LiteralPath $log -Raw | ConvertFrom-Json)}
+""", extra={"SC_STARTUP": ROOT / "启动AI养老院.ps1"})
+        self.assertEqual(Path(answer["entry"]), entry)
+        self.assertEqual(Path(answer["directory"]), frontend)
+        self.assertEqual(answer["arguments"], {"host": "127.0.0.1", "port": 18765})
+
     def test_missing_configuration_fails_before_external_tools_or_services(self):
         for name in ("启动AI养老院.ps1", "启停工具.ps1", "校验环境.ps1"):
             shutil.copyfile(ROOT / name, self.root / name)

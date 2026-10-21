@@ -94,7 +94,7 @@
                 >
                   <el-option
                     clearable
-                    :label="item.name"
+                    :label="item.label"
                     :value="item.value"
                     v-for="item in auditResultList"
                     :key="item.value"

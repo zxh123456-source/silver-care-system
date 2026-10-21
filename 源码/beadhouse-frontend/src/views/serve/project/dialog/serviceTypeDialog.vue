@@ -110,7 +110,7 @@ const emit = defineEmits<{
 //点击提交
 const handleSubmit = async (formRef: FormInstance | null) => {
   if (!formRef) return;
-  formRef.validate(async (valid, fields) => {
+  formRef.validate(async (valid) => {
     if (valid) {
       try {
         const res = await drawerProps.value.api!(formData.value);
@@ -129,7 +129,7 @@ const handleSubmit = async (formRef: FormInstance | null) => {
         console.log(error);
       }
     } else {
-      return fields;
+      return;
     }
   });
 };

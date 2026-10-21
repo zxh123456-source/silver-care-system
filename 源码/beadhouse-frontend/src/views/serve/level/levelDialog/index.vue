@@ -29,7 +29,7 @@
                 >
                   <el-option
                     clearable
-                    :label="item.name"
+                    :label="item.label"
                     :value="item.value"
                     v-for="item in nurseTypeList"
                     :key="item.value"
@@ -187,13 +187,13 @@ const formData = ref<any>({
 });
 
 // 添加服务
-const addService = (serviceList: any) => {
+const addService = (serviceList: any[]) => {
   // 初始化Array
   formData.value.serviceIdList = initArray(formData.value.serviceIdList);
   formData.value.nurseGradeServiceVoList = initArray(formData.value.nurseGradeServiceVoList);
 
   // 传入所有对象
-  formData.value.nurseGradeServiceVoList = arrayPushAllByObj(serviceList.value, formData.value.nurseGradeServiceVoList);
+  formData.value.nurseGradeServiceVoList = arrayPushAllByObj(serviceList, formData.value.nurseGradeServiceVoList);
 
   // 去重
   formData.value.nurseGradeServiceVoList = arrayDeduplicationByFiled(formData.value.nurseGradeServiceVoList, "id");

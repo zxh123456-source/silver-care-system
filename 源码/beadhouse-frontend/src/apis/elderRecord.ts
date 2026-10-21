@@ -43,8 +43,8 @@ export async function exportExcel(session: ResourceSession): Promise<Blob> {
 // 分页查询员工
 export function pageElderByKey(data: IPageElderByKey, session: ResourceSession = captureResourceSession()) {
   // 因为后台返回的字段与前端表单数据的prop不一样，但是组件封装是需要一样的，所以请求前增加一些这两个字段
-  Reflect.has(data, "sex") ? (data.elderSex = data.sex) : "";
-  Reflect.has(data, "name") ? (data.elderName = data.name) : "";
+  if (Reflect.has(data, "sex")) data.elderSex = data.sex;
+  if (Reflect.has(data, "name")) data.elderName = data.name;
   return http.get("/api/elderRecord/pageElderByKey", { ...checkedResourceSessionConfig(session),
     params: {
       ...data

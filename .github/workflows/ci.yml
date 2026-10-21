@@ -230,6 +230,10 @@ jobs:
         run: npm run test:notifications
       - name: Verify UI lifecycle, response races and form sessions
         run: npm run test:ui-recovery
+      - name: Verify build migration and dependency compatibility
+        run: npm run test:build-compat && npm run test:dependency-security
+      - name: Audit complete and production dependency graphs
+        run: npm run audit:dependencies
       - name: Build with TypeScript and ESLint checks
         run: npm run build
       - name: Upload verified frontend for browser tests

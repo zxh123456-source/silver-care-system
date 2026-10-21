@@ -4,7 +4,7 @@
 
 ## 项目结构
 
-- `源码/beadhouse-frontend`：Vue 3 + TypeScript 前端
+- `源码/beadhouse-frontend`：Vue 3 + TypeScript + Vite 前端
 - `源码/beadhouse-backend`：Spring Boot + MyBatis Plus 后端
 - `源码/beadhouse-ai`：FastAPI + BGE + Milvus 混合检索服务
 - `数据库/ai_care_upgrade.sql`：AI 功能增量迁移
@@ -187,7 +187,13 @@ RAG使用MySQL版本快照与领取租约、Python持久化墓碑与跨进程文
 
 ## 配置回归检查
 
-GitHub Actions 的 `CI` 工作流在 main 推送、面向 main 的 PR（含草稿）及手动触发时运行：数据库迁移/恢复、后端 JDK 8 完整构建和独立 MySQL/Redis 集成、前端 Node 24 全新 `npm ci`与62项契约及构建、Python 3.12全依赖/pytest/真实BGE质量门禁，以及Chromium端到端回归和 Windows 启停所有权/恢复行为回归。关键的十七组后端集成（含权限、认证、附件、资金/床位并发、告警、RAG租约及实际SQL分页）若缺失或跳过，CI会失败。报告作为artifact保留7天；普通ESLint警告不导致构建失败。
+前端使用 Node 24：在 `源码/beadhouse-frontend` 执行 `npm ci`、`npm run dev`（127.0.0.1:8080）或 `npm run build`。构建依次执行 `vue-tsc --noEmit`、ESLint 和 Vite；Vite 自身不做类型检查，Sass 并发限制为2以控制多核机器上的编译进程数量。开发代理从 `SILVERCARE_BACKEND_URL` 读取后端地址（默认 `http://127.0.0.1:9001`），`/api` 去前缀后转发，端口占用直接失败。一键启动自动传入当前实例的后端地址和前端端口。
+
+旧 Vue CLI 构建链已迁移为 Vite。Tailwind 4 使用独立 PostCSS 插件和 `src/styles/tailwind.css`，显式加载原 JS 配置；保留页面现用色值、边框默认色及未分层覆盖顺序。浏览器最低要求为现代 Chromium、Safari 16.4+、Firefox 128+，不承诺旧浏览器支持；详见 [Tailwind 迁移说明](https://tailwindcss.com/docs/upgrade-guide)。`external-editor` 的 `tmp` 覆盖为0.2.7，保留中文交互式提交；`brace-expansion` 与 `picomatch` 仅覆盖有漏洞的旧版本范围，不降低新主版本。
+
+`npm run audit:dependencies` 分别审计完整依赖和生产依赖，任何级别告警都失败；不能以转移到开发依赖或忽略公告代替修复。兼容回归命令为 `npm run test:build-compat` 和 `npm run test:dependency-security`，覆盖懒路由、SVG/床位图片、真实 CSS 生成与提交工具的临时文件安全。
+
+GitHub Actions 的 `CI` 工作流在 main 推送、面向 main 的 PR（含草稿）及手动触发时运行：数据库迁移/恢复、后端 JDK 8 完整构建和独立 MySQL/Redis 集成、前端 Node 24 全新 `npm ci`与业务/依赖兼容契约、完整/生产依赖审计及构建、Python 3.12全依赖/pytest/真实BGE质量门禁，以及Chromium端到端回归和 Windows 启停所有权/恢复行为回归。关键的十七组后端集成（含权限、认证、附件、资金/床位并发、告警、RAG租约及实际SQL分页）若缺失或跳过，CI会失败。报告作为artifact保留7天；普通ESLint警告不导致构建失败。
 
 CI使用临时库和合成凭据，不读取本地 `.env`，不需要GitHub Secrets，不投递真实邮件或调用付费模型。浏览器使用已验证的同一JAR/dist，在全新MySQL/专用Redis验证真实业务页面及数据库写入，并对丢响应、延迟和暂时失败做定向故障注入。失败保留截图、trace、后端日志和JUnit；Vue捕获后输出的console.error也纳入异常门禁。OCR仍按环境执行，Windows Tesseract相关项在Linux跳过。BGE评测仅覆盖当前合成制度语料；其他浏览器、移动端需另行验证；完整 Windows/Docker Desktop 一键启动另通过隔离副本验收，不由 Linux 浏览器代理测试代替。
 
