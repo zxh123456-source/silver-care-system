@@ -1,5 +1,7 @@
+param([switch]$UseCurrentEnvironment)
 # Explicitly initialize ONLY the original imported demo administrator. Not a production password reset tool.
 $ErrorActionPreference = 'Stop'
+if (-not $UseCurrentEnvironment) {
 foreach ($line in Get-Content -LiteralPath (Join-Path $PSScriptRoot '.env') -Encoding UTF8) {
     if ($line -match '^\s*([A-Z][A-Z0-9_]*)\s*=\s*(.*)\s*$') {
         [Environment]::SetEnvironmentVariable($matches[1], $matches[2].Trim('"').Trim("'"), 'Process')
@@ -7,7 +9,8 @@ foreach ($line in Get-Content -LiteralPath (Join-Path $PSScriptRoot '.env') -Enc
 }
 $localConfig = Join-Path $PSScriptRoot '本地配置.ps1'
 if (Test-Path -LiteralPath $localConfig) { . $localConfig }
-$java = if ($env:JAVA_HOME) { Join-Path $env:JAVA_HOME 'bin/java.exe' } else { (Get-Command java -ErrorAction Stop).Source }
+}
+$java = if ($env:SILVERCARE_JAVA) { $env:SILVERCARE_JAVA } elseif ($env:JAVA_HOME) { Join-Path $env:JAVA_HOME 'bin/java.exe' } else { (Get-Command java -ErrorAction Stop | Select-Object -First 1).Source }
 $jar = Join-Path $PSScriptRoot '源码/beadhouse-backend/target/beadhouse-backend-0.0.1-SNAPSHOT.jar'
 if (-not (Test-Path -LiteralPath $jar)) { throw '请先在后端目录执行 mvn package' }
 $runtime = Join-Path $PSScriptRoot '.runtime'

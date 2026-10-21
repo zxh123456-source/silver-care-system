@@ -21,7 +21,7 @@ public class AddOutboundRecordQuery {
     private String materialUse;
     @ApiModelProperty(value = "登记人编号", required = true, example = "1")
     private Long staffId;
-    @ApiModelProperty(value = "出库物资列表", required = true, example = "[{'warehouseMaterialId':1,'outboundNum':10}]")
+    @ApiModelProperty(value = "出库物资列表", required = true, example = "[{\"warehouseMaterialId\":1,\"outboundNum\":10}]")
     private List<AddOutboundMaterialQuery> outboundMaterialQueryList;
 
     @Data

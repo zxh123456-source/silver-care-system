@@ -16,7 +16,7 @@ public class AddOrderQuery {
     private String dineDate;
     @ApiModelProperty(value = "就餐方式", required = true, example = "送餐/堂食")
     private String dineType;
-    @ApiModelProperty(value = "就餐方式", required = true, example = "[{'dishesId':1,'orderNum':2}]")
+    @ApiModelProperty(value = "就餐方式", required = true, example = "[{\"dishesId\":1,\"orderNum\":2}]")
     private List<AddOrderDishesQuery> orderDishesList;
 
     @Data

@@ -9,27 +9,35 @@
 - `源码/beadhouse-ai`：FastAPI + BGE + Milvus 混合检索服务
 - `数据库/ai_care_upgrade.sql`：AI 功能增量迁移
 - `AI护理工作台使用说明.md`：AI 功能、接口和验收说明
-- `启动AI养老院.ps1`、`停止AI养老院.ps1`：Windows 本地启动和停止脚本
+- `启动AI养老院.ps1`、`停止AI养老院.ps1`、`重启AI养老院.ps1`、`查看运行状态.ps1`：Windows 本地生命周期入口
 
 ## 本地准备
 
-1. 准备 JDK 8、Maven 3、Node.js、Python 3.12、PowerShell 7 和 Docker Desktop，不需要单独安装 MySQL 或 Redis。
-2. 首次运行 `初始化本地配置.ps1`，生成已被 Git 忽略的 `.env`，其中数据库、Redis、JWT、MinIO、Milvus、RAG 密钥均独立随机生成。已有 `.env` 时脚本拒绝覆盖，也可以手动参考 `.env.example` 配置。
-3. 在下面三个目录分别执行依赖安装和构建（终端需能找到 `java`、`mvn`、`node`、`npm`、`python`、`docker`；后端设置 `JAVA_HOME` 指向 JDK 8）：
+1. 准备 JDK 8、Maven 3、Node.js 24、Python 3.12、PowerShell 7 和 Docker Desktop（Linux 容器模式）。终端须能找到 `java`、`mvn.cmd`、`node`、`npm.cmd`、`py` 或配置下述工具路径，以及 `docker.exe`；不需要本机安装 MySQL 或 Redis。
+2. 在项目根目录的 PowerShell 7 中，首次虚构演示环境执行：
 
 ```powershell
-# 源码/beadhouse-backend
-mvn package -DskipTests
-# 源码/beadhouse-frontend
-npm ci
-# 源码/beadhouse-ai
-python -m venv .venv
-.\.venv\Scripts\pip.exe install -r requirements.txt
+./启动AI养老院.ps1 -Prepare -InitializeDemo -AcknowledgeDemoOnly
 ```
 
-4. 回到根目录执行 `docker compose up -d --wait`，等待首次导入完成。
-5. 仅首次导入虚构演示库时执行 `./初始化演示账号.ps1`。脚本仅转换原始演示管理员为随机 BCrypt 密码，登录凭据写入被 Git 忽略的 `.runtime/demo-accounts.txt`；重复执行不会覆盖已改过的密码。不需要旧 AES 密钥。其他旧演示员工不会被重置，仍需历史 AES 配置；也可由管理员新增演示员工并分配角色和老人。
-6. 运行 `./启动AI养老院.ps1`。脚本会启动 Docker 基础设施，再启动本机 Spring Boot、FastAPI 和 Vue，访问 `http://127.0.0.1:8080`。
+`-Prepare` 仅在缺失时生成随机 `.env`，然后构建后端、执行 `npm ci`、创建 Python 3.12 虚拟环境并安装完整 RAG 依赖。已有 `.env` 不会覆盖；准备日志写入 `.runtime/logs/<Compose项目>/prepare-*.log`。已有依赖的日常启动不加 `-Prepare`；准备时应用必须已停止。首次需要网络下载软件包、镜像和 BGE 模型，后续可复用缓存。
+
+`-InitializeDemo -AcknowledgeDemoOnly` 仅用于未改动的原始虚构演示管理员，转换为随机 BCrypt 密码；凭据保存于已被 Git 忽略的 `.runtime/demo-accounts.txt`，不在终端打印。重复初始化不覆盖已修改密码。已有业务库不要加这两个参数。其他旧演示员工仍需历史 AES 配置，或由管理员新增员工并分配角色和老人。
+
+3. 启动成功后访问 `http://127.0.0.1:8080`。后端默认 `9001`，RAG `8001`。日常操作：
+
+```powershell
+./启动AI养老院.ps1
+./查看运行状态.ps1
+./重启AI养老院.ps1
+./停止AI养老院.ps1
+```
+
+脚本验证容器健康、数据库迁移版本、真实 BGE/Milvus 诊断、后端鉴权和实际前端代理。未知端口占用会失败；重复启动验证原实例，不重复启动应用。部分失败只回滚本次新启动的服务，保留数据卷与原来运行的资源。停止依赖 `.runtime/lifecycle-<Compose项目>.json` 中的项目路径、进程创建时间、命令和容器标签，不按端口杀进程；配置缺失时仍可停止有有效状态的实例。手动运行或其他目录的同名 Compose 项目不会自动接管。
+
+如需与队友其他服务共存，可在 `.env` 中设置 `COMPOSE_PROJECT_NAME` 和 `MYSQL_PORT`、`REDIS_PORT`、`MILVUS_PORT`、`MILVUS_HEALTH_PORT`、`RAG_PORT`、`BACKEND_PORT`、`FRONTEND_PORT`（默认依次为 `silver-care-system`、3308、6379、19530、9091、8001、9001、8080），或向启动入口传 `-ComposeProject`、`-MysqlPort` 等同名参数。重启复用该项目上次保存的端口；停止/状态入口指定同一个 `-ComposeProject`。修改运行中配置前先停止；项目内上传文件和 RAG 本地状态保存在 `.runtime`，停止不会删除。
+
+工具不在 PATH 时可设置 `JAVA_HOME`，或通过 `SILVERCARE_JAVA`、`SILVERCARE_NODE`、`SILVERCARE_MAVEN`、`SILVERCARE_PYTHON` 指定可执行文件绝对路径；Python 路径用于首次创建虚拟环境。不要提交 `.env`、`本地配置.ps1`、`.runtime` 或演示凭据。
 
 MySQL 新数据卷通过统一执行器导入演示库，再按顺序应用 `数据库/migrations.tsv` 中的全部增量迁移；演示身份信息与联系方式均为虚构测试数据。已有库使用 `./升级数据库.ps1`，绝不重新导入演示 dump。首次安装、旧库升级、CI和浏览器测试共用版本清单；MySQL健康检查与本机启动脚本都检查版本完整性，普通启动不会自动升级已有库。升级操作见下节，不要删除数据卷升级。
 
@@ -179,9 +187,9 @@ RAG使用MySQL版本快照与领取租约、Python持久化墓碑与跨进程文
 
 ## 配置回归检查
 
-GitHub Actions 的 `CI` 工作流在 main 推送、面向 main 的 PR（含草稿）及手动触发时运行：数据库迁移/恢复、后端 JDK 8 完整构建和独立 MySQL/Redis 集成、前端 Node 24 全新 `npm ci`与62项契约及构建、Python 3.12全依赖/pytest/真实BGE质量门禁，以及Chromium端到端回归。关键的十七组后端集成（含权限、认证、附件、资金/床位并发、告警、RAG租约及实际SQL分页）若缺失或跳过，CI会失败。报告作为artifact保留7天；普通ESLint警告不导致构建失败。
+GitHub Actions 的 `CI` 工作流在 main 推送、面向 main 的 PR（含草稿）及手动触发时运行：数据库迁移/恢复、后端 JDK 8 完整构建和独立 MySQL/Redis 集成、前端 Node 24 全新 `npm ci`与62项契约及构建、Python 3.12全依赖/pytest/真实BGE质量门禁，以及Chromium端到端回归和 Windows 启停所有权/恢复行为回归。关键的十七组后端集成（含权限、认证、附件、资金/床位并发、告警、RAG租约及实际SQL分页）若缺失或跳过，CI会失败。报告作为artifact保留7天；普通ESLint警告不导致构建失败。
 
-CI使用临时库和合成凭据，不读取本地 `.env`，不需要GitHub Secrets，不投递真实邮件或调用付费模型。浏览器使用已验证的同一JAR/dist，在全新MySQL/专用Redis验证真实业务页面及数据库写入，并对丢响应、延迟和暂时失败做定向故障注入。失败保留截图、trace、后端日志和JUnit；Vue捕获后输出的console.error也纳入异常门禁。OCR仍按环境执行，Windows Tesseract相关项在Linux跳过。BGE评测仅覆盖当前合成制度语料；其他浏览器、移动端和完整本机一键启动需另行验证。
+CI使用临时库和合成凭据，不读取本地 `.env`，不需要GitHub Secrets，不投递真实邮件或调用付费模型。浏览器使用已验证的同一JAR/dist，在全新MySQL/专用Redis验证真实业务页面及数据库写入，并对丢响应、延迟和暂时失败做定向故障注入。失败保留截图、trace、后端日志和JUnit；Vue捕获后输出的console.error也纳入异常门禁。OCR仍按环境执行，Windows Tesseract相关项在Linux跳过。BGE评测仅覆盖当前合成制度语料；其他浏览器、移动端需另行验证；完整 Windows/Docker Desktop 一键启动另通过隔离副本验收，不由 Linux 浏览器代理测试代替。
 
 Python job启动隔离认证Milvus/MinIO/etcd，强制5项真实索引故障/乱序/集合重建及Linux fork回归；再以实际BGE执行独立服务和随机集合的质量门禁，报告模型SHA、逐题结果及分组延迟，详见 [RAG评测与基线](./源码/beadhouse-ai/README.md)。测试集合和数据卷结束时清理。
 

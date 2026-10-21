@@ -14,6 +14,7 @@ function Assert-ProjectEnvironment {
     if ($env:MILVUS_ROOT_PASSWORD -notmatch '^[A-Za-z0-9_-]+$') { throw 'MILVUS_ROOT_PASSWORD 仅支持字母、数字、下划线和短横线' }
     if (-not $env:RAG_INTERNAL_TOKEN) { $env:RAG_INTERNAL_TOKEN = $env:AI_RAG_INTERNAL_TOKEN }
     if ($env:RAG_INTERNAL_TOKEN -cne $env:AI_RAG_INTERNAL_TOKEN) { throw 'RAG_INTERNAL_TOKEN 必须与 AI_RAG_INTERNAL_TOKEN 一致' }
+    if ((-not $env:DB_USERNAME -or $env:DB_USERNAME -eq 'root') -and $env:DB_PASSWORD -cne $env:MYSQL_ROOT_PASSWORD) { throw '本地 Compose 使用 root 时 DB_PASSWORD 必须与 MYSQL_ROOT_PASSWORD 一致。' }
     if (-not $env:RAG_MILVUS_TOKEN) { $env:RAG_MILVUS_TOKEN = 'root:' + $env:MILVUS_ROOT_PASSWORD }
     if ($env:LEGACY_AES_IV -or $env:LEGACY_AES_KEY) {
         $ivBytes = [Text.Encoding]::UTF8.GetByteCount([string]$env:LEGACY_AES_IV)

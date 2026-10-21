@@ -1,7 +1,7 @@
 ﻿# Shared Docker selection and transport. The manifest lives in 数据库/migrations.tsv.
 function Resolve-DatabaseContainer {
     param([string]$Container)
-    $docker = (Get-Command docker -ErrorAction Stop).Source
+    $docker = (Get-Command docker -ErrorAction Stop | Select-Object -First 1).Source
     if (-not $Container) {
         $compose = Join-Path $PSScriptRoot 'docker-compose.yml'
         $ids = @(& $docker compose -f $compose ps -q mysql)
@@ -23,7 +23,7 @@ function Invoke-ProjectDatabase {
         [string]$Container,
         [switch]$RetryFailed
     )
-    $docker = (Get-Command docker -ErrorAction Stop).Source
+    $docker = (Get-Command docker -ErrorAction Stop | Select-Object -First 1).Source
     $containerId = Resolve-DatabaseContainer -Container $Container
     $remoteDirectory = '/tmp/silvercare-db-' + [Guid]::NewGuid().ToString('N')
     $source = Join-Path $PSScriptRoot '数据库/.'

@@ -1,4 +1,4 @@
-name: silver-care-system
+name: ${COMPOSE_PROJECT_NAME:-silver-care-system}
 
 services:
   mysql:
@@ -13,7 +13,7 @@ services:
       - --collation-server=utf8mb4_0900_ai_ci
       - --default-time-zone=+08:00
     ports:
-      - "127.0.0.1:3308:3306"
+      - "127.0.0.1:${MYSQL_PORT:-3308}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
       - ./数据库:/opt/silvercare/database:ro
@@ -32,7 +32,7 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?请配置 REDIS_PASSWORD}
     command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$${REDIS_PASSWORD}\""]
     ports:
-      - "127.0.0.1:6379:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -91,8 +91,8 @@ services:
     volumes:
       - milvus_data:/var/lib/milvus
     ports:
-      - "127.0.0.1:19530:19530"
-      - "127.0.0.1:9091:9091"
+      - "127.0.0.1:${MILVUS_PORT:-19530}:19530"
+      - "127.0.0.1:${MILVUS_HEALTH_PORT:-9091}:9091"
     depends_on:
       etcd:
         condition: service_healthy

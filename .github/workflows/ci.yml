@@ -15,6 +15,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  startup-windows:
+    name: Windows / startup ownership + recovery
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Parse PowerShell entry points
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($file in Get-ChildItem -LiteralPath . -Filter '*.ps1' -File) {
+            $tokens = $null
+            $errors = $null
+            [Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count) { throw "$($file.Name): $($errors.Message -join '; ')" }
+          }
+      - name: Verify lifecycle safety with real owned processes
+        shell: pwsh
+        run: python -m unittest discover -s tools -p test_startup.py -v
+
   database:
     name: Database / migrations + isolated restore
     runs-on: ubuntu-24.04
