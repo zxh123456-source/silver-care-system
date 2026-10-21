@@ -3,10 +3,21 @@ const { test } = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { spawnSync } = require('node:child_process');
 const dependencyRequire = process.env.FRONTEND_TEST_DEPENDENCIES
   ? require('node:module').createRequire(path.resolve(process.env.FRONTEND_TEST_DEPENDENCIES, 'package.json')) : require;
 const ts = dependencyRequire('typescript');
 const { parse } = dependencyRequire('@vue/compiler-sfc');
+
+test('the configured Chinese locale resolves through the actual ESM package exports', () => {
+  const app = fs.readFileSync(path.join(__dirname, '../src/App.vue'), 'utf8');
+  const specifier = app.match(/import zhCn from ['"]([^'"]+)['"]/)[1];
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e',
+    'const {default:locale}=await import(process.argv[1]); if(locale.name!=="zh-cn"||!locale.el.pagination) throw new Error("Chinese locale missing");',
+    specifier], { cwd: process.env.FRONTEND_TEST_DEPENDENCIES || path.join(__dirname, '..'),
+    encoding: 'utf8', timeout: 30000, windowsHide: true });
+  assert.equal(result.status, 0, result.stderr || result.error?.message);
+});
 
 // Substitute the bundler's module discovery and imported UI/asset boundaries;
 // execute the shipped TypeScript rather than a second implementation of its logic.
