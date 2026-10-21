@@ -6,7 +6,6 @@ Credentials stay in memory; evidence contains only synthetic operation identifie
 import argparse
 import hashlib
 import json
-import re
 import time
 import uuid
 from pathlib import Path
@@ -75,7 +74,9 @@ def run(project: Path, port: int, evidence: Path, phase: str):
                 return value.get("data")
 
             def route(path, heading):
-                page.goto(origin + "/#" + path)
+                # Navigating to the same hash preserves the mounted catalog's old response.
+                # A fresh document verifies independently persisted state after async work.
+                page.goto(origin + "/?startup=" + str(time.monotonic_ns()) + "#" + path)
                 expect(page.get_by_role("heading", name=heading, exact=True)).to_be_visible()
 
             if phase == "write":

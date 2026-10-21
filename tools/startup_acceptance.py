@@ -187,7 +187,6 @@ def main():
     parser.add_argument("--timeout-seconds", type=int, default=300)
     parser.add_argument("--command-timeout-seconds", type=int, default=2400)
     parser.add_argument("--prepare", action="store_true", help="Retry initial dependency/demo preparation with --action start in the existing isolated copy")
-    parser.add_argument("--keep-running", action="store_true", help="Explicitly document the default: retain services for business acceptance")
     args = parser.parse_args()
     if args.prepare and args.action not in ("fresh", "start"):
         parser.error("--prepare is valid only with fresh/start")

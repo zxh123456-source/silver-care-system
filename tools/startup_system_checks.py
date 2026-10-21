@@ -4,6 +4,7 @@ Requires the clean-copy runner's manifest. Never selects containers by a user
 service name or removes volumes. Every fault is restored before returning.
 """
 import argparse
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -13,10 +14,16 @@ import subprocess
 import tempfile
 import time
 from types import SimpleNamespace
+import urllib.request
 
 from startup_acceptance import invoke, isolated_environment, validate_manifest
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def process_key(item):
+    created = datetime.fromisoformat(item["createdUtc"].replace("Z", "+00:00"))
+    return item["pid"], created.astimezone(timezone.utc).isoformat(timespec="microseconds")
 
 
 def run(manifest_path, phase):
@@ -47,11 +54,11 @@ def run(manifest_path, phase):
     def state():
         value = json.loads(state_path.read_text(encoding="utf-8"))
         for item in value["processes"]:
-            observed_processes[(item["pid"], item["createdUtc"])] = item
+            observed_processes[process_key(item)] = item
         return value
 
     def identities(value):
-        return sorted((p["name"], p["pid"], p["createdUtc"]) for p in value["processes"])
+        return sorted((p["name"], *process_key(p)) for p in value["processes"])
 
     def containers(value):
         results = []
@@ -150,6 +157,44 @@ def run(manifest_path, phase):
         assert [c for c, _ in containers(state())] == [c for c, _ in expected_containers]
         invoke(manifest, "status", manifest_path)
         record("restart reused recorded non-default ports and volumes without explicit port arguments")
+    elif phase == "repair":
+        before = state()
+        expected_containers = containers(before)
+        survivors = {"rag", "rag-logger", "backend", "backend-logger"}
+        expected_survivors = identities({"processes": [p for p in before["processes"] if p["name"] in survivors]})
+        env = isolated_environment(project)
+        env["SC_CHECK_HELPER"] = str(project / "启停工具.ps1")
+        env["SC_CHECK_IDENTITIES"] = json.dumps([p for p in before["processes"] if p["name"] in {"frontend", "frontend-logger"}])
+        stopped = subprocess.run([pwsh, "-NoProfile", "-Command",
+            "$ErrorActionPreference='Stop'; . $env:SC_CHECK_HELPER; "
+            "$items=$env:SC_CHECK_IDENTITIES | ConvertFrom-Json -AsHashtable; "
+            "$items | Sort-Object {if($_.name -eq 'frontend'){0}else{1}} | ForEach-Object {Stop-OwnedProcess $_}"],
+            env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=45)
+        assert stopped.returncode == 0, "Could not stop this copy's frontend for the partial repair test"
+        vue_config = project / "源码/beadhouse-frontend/vue.config.js"
+        original = vue_config.read_bytes()
+        frontend_error = project / f'.runtime/logs/{manifest["composeProject"]}/frontend.err.log'
+        frontend_error.write_bytes(b"")
+        try:
+            vue_config.write_bytes(b"throw new Error('synthetic partial repair failure');\n" + original)
+            failed = direct("start", timeout=20)
+            (manifest_path.parent / "fault-partial-repair.log").write_bytes(failed.stdout)
+            assert failed.returncode != 0
+            assert b"synthetic partial repair failure" in frontend_error.read_bytes(), "Did not reach the injected repair fault"
+            assert identities(state()) == expected_survivors, "Failed repair changed an originally healthy application"
+            assert containers(state()) == expected_containers, "Failed repair changed originally running infrastructure"
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            for key, path, field, expected in (("RagPort", "/health", "backend", "milvus-hybrid"),
+                                                ("BackendPort", "/v2/api-docs", "swagger", "2.0")):
+                with opener.open(f'http://127.0.0.1:{manifest["ports"][key]}{path}', timeout=5) as response:
+                    assert json.load(response)[field] == expected
+        finally:
+            vue_config.write_bytes(original)
+        record("failed frontend repair preserved exact running Java/RAG identities and all five container IDs, confirmed by live HTTP")
+        invoke(manifest, "start", manifest_path)
+        invoke(manifest, "status", manifest_path)
+        assert identities({"processes": [p for p in state()["processes"] if p["name"] in survivors]}) == expected_survivors
+        record("frontend repair succeeded without restarting the original Java/RAG services")
     else:
         before = state()
         original = env_file.read_bytes()
@@ -211,6 +256,6 @@ def run(manifest_path, phase):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, required=True)
-    parser.add_argument("--phase", choices=("running", "recovery"), required=True)
+    parser.add_argument("--phase", choices=("running", "recovery", "repair"), required=True)
     args = parser.parse_args()
     run(args.manifest, args.phase)

@@ -122,7 +122,16 @@ try {
     Invoke-LifecycleCommand $python @('-c','import sys, uvicorn, fastembed, pymilvus; assert sys.version_info[:2] == (3,12), "Python 3.12 required"') $aiDir (Join-Path $logDir 'python-check.log')
     $state.processes=$liveProcesses; $state.ports=$ports; $state.configurationFingerprint=$fingerprint
     Save-LifecycleState $state $config.statePath
-    $newProcesses=@(); $newContainers=@()
+    $newProcesses=[Collections.Generic.List[object]]::new(); $newContainers=@()
+    $saveStateCheckpoint=${function:Save-LifecycleState}
+    $checkpointIdentity={
+        param($identity)
+        if (@($state.processes | Where-Object { $_.pid -eq $identity.pid -and $_.name -eq $identity.name }).Count -eq 0) {
+            $state.processes=@($state.processes) + @($identity)
+            $newProcesses.Add($identity)
+            & $saveStateCheckpoint $state $config.statePath
+        }
+    }.GetNewClosure()
     try {
         Write-Host "启动并检查基础设施；日志：$(Join-Path $logDir 'compose.log')"
         Start-LifecycleInfrastructure $state $config.statePath $docker $composeArguments (Join-Path $logDir 'compose.log')
@@ -154,9 +163,7 @@ try {
                 backend { @{file=$java;arguments=@('-jar',$jar,"--server.port=$($ports.BackendPort)",'--server.address=127.0.0.1',"--filesave.windows=$uploadDir","--filesave.linux=$uploadDir");directory=$backendDir} }
                 frontend { @{file=$node;arguments=@($vue,'serve','--host','127.0.0.1','--port',[string]$ports.FrontendPort);directory=$frontendDir} }
             }
-            $started=@(Start-LifecycleProcess $name $launch.file $launch.arguments $launch.directory $projectRoot $logDir)
-            $newProcesses+=$started; $state.processes+=$started
-            Save-LifecycleState $state $config.statePath
+            Start-LifecycleProcess $name $launch.file $launch.arguments $launch.directory $projectRoot $logDir -OnIdentity $checkpointIdentity | Out-Null
         }
         Write-Host '等待真实 HTTP、BGE 模型、Milvus 和前端代理健康检查。'
         Wait-LifecycleCondition -TimeoutSeconds $TimeoutSeconds -Description 'RAG BGE + Milvus 认证诊断' -Condition {

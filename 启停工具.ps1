@@ -97,6 +97,42 @@ namespace SilverCare {
     return $Path
 }
 
+function Start-LifecycleSupervisor([Diagnostics.ProcessStartInfo]$StartInfo) {
+    if (-not ('SilverCare.NativeHandles' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+namespace SilverCare {
+    public static class NativeHandles {
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern IntPtr GetStdHandle(int standardHandle);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool GetHandleInformation(IntPtr handle, out uint flags);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern bool SetHandleInformation(IntPtr handle, uint mask, uint flags);
+    }
+}
+'@
+    }
+    $changed=[Collections.Generic.List[object]]::new()
+    try {
+        # .NET redirects the child's standard handles, but CreateProcess can
+        # still inherit the launcher's original capture pipes on Windows.
+        foreach ($number in @(-10,-11,-12)) {
+            $handle=[SilverCare.NativeHandles]::GetStdHandle($number)
+            if ($handle -eq [IntPtr]::Zero -or $handle -eq [IntPtr]::new(-1)) { continue }
+            $flags=[uint32]0
+            if ([SilverCare.NativeHandles]::GetHandleInformation($handle,[ref]$flags) -and ($flags -band 1)) {
+                if (-not [SilverCare.NativeHandles]::SetHandleInformation($handle,1,0)) { throw '无法隔离日志进程的继承句柄，未启动应用。' }
+                $changed.Add(@{handle=$handle;flags=($flags -band 1)})
+            }
+        }
+        return [Diagnostics.Process]::Start($StartInfo)
+    } finally {
+        foreach ($entry in $changed) { [void][SilverCare.NativeHandles]::SetHandleInformation($entry.handle,1,$entry.flags) }
+    }
+}
+
 function Enter-LifecycleLock([string]$StatePath) {
     $digest=Get-LifecycleDigest ([Text.Encoding]::UTF8.GetBytes($StatePath.ToLowerInvariant()))
     $mutex=[Threading.Mutex]::new($false, "Local\SilverCareLifecycle-$digest")
@@ -174,7 +210,36 @@ function Stop-OwnedProcess($Identity) {
         }
     }
     for ($index = $owned.Count - 1; $index -ge 0; $index--) {
-        if (Test-ProcessIdentity $owned[$index]) { Stop-Process -Id $owned[$index].pid -Force -ErrorAction Stop }
+        $identityToStop=$owned[$index]
+        $processToStop=$null
+        try {
+            # Bind a handle before the final identity check: Kill must target
+            # this process object even if its numeric PID is subsequently reused.
+            $processToStop=[Diagnostics.Process]::GetProcessById($identityToStop.pid)
+            $null=$processToStop.SafeHandle
+            $handleCreated=$processToStop.StartTime.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss.ffffff')
+            $recordedCreated=([DateTimeOffset]$identityToStop.createdUtc).UtcDateTime.ToString('yyyy-MM-ddTHH:mm:ss.ffffff')
+            if (Test-ProcessIdentity $identityToStop) {
+                if ($handleCreated -ne $recordedCreated) { throw '进程句柄创建时间与状态不符，已拒绝停止；请保留状态后重试。' }
+                $processToStop.Kill()
+                if (-not $processToStop.WaitForExit(5000)) { throw '自有进程停止超时，请重试停止。' }
+            }
+        } catch {
+            # A child exiting can make its waiting logger exit concurrently.
+            # Retain errors when the same owned process is still alive.
+            if (Test-ProcessIdentity $identityToStop) { throw }
+        } finally { if ($processToStop) { $processToStop.Dispose() } }
+    }
+    if ($Identity.launchConfigPath) { Remove-LifecycleLaunchFiles $Identity.launchConfigPath $Identity.projectRoot }
+}
+
+function Remove-LifecycleLaunchFiles([string]$ConfigPath, [string]$ProjectRoot) {
+    if (-not $ConfigPath) { return }
+    $directory=[IO.Path]::GetFullPath((Join-Path $ProjectRoot '.runtime/logs')).TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar
+    $resolved=[IO.Path]::GetFullPath($ConfigPath)
+    if (-not $resolved.StartsWith($directory,[StringComparison]::OrdinalIgnoreCase) -or [IO.Path]::GetFileName($resolved) -cnotmatch '^[A-Za-z0-9_-]+-[a-f0-9]{32}\.launch\.json$') { return }
+    foreach ($suffix in @('', '.gate', '.identity', '.identity.tmp')) {
+        if (Test-Path -LiteralPath "$resolved$suffix" -PathType Leaf) { Remove-Item -LiteralPath "$resolved$suffix" -Force -ErrorAction SilentlyContinue }
     }
 }
 
@@ -284,48 +349,80 @@ function Wait-LifecycleCondition([scriptblock]$Condition, [int]$TimeoutSeconds, 
     throw "$Description 未在 $TimeoutSeconds 秒内通过健康检查。"
 }
 
-function Start-LifecycleProcess([string]$Name, [string]$FilePath, [string[]]$Arguments, [string]$WorkingDirectory, [string]$ProjectRoot, [string]$LogDirectory) {
+function Start-LifecycleProcess([string]$Name, [string]$FilePath, [string[]]$Arguments, [string]$WorkingDirectory, [string]$ProjectRoot, [string]$LogDirectory, [scriptblock]$OnIdentity) {
     $configPath = Join-Path $LogDirectory ("$Name-" + [Guid]::NewGuid().ToString('N') + '.launch.json')
-    $config = @{name=$Name;filePath=$FilePath;arguments=$Arguments;workingDirectory=$WorkingDirectory;projectRoot=$ProjectRoot;stdout=(Join-Path $LogDirectory "$Name.log");stderr=(Join-Path $LogDirectory "$Name.err.log");identityPath="$configPath.identity"}
+    $config = @{name=$Name;filePath=$FilePath;arguments=$Arguments;workingDirectory=$WorkingDirectory;projectRoot=$ProjectRoot;stdout=(Join-Path $LogDirectory "$Name.log");stderr=(Join-Path $LogDirectory "$Name.err.log");identityPath="$configPath.identity";gatePath="$configPath.gate"}
     [IO.File]::WriteAllText($configPath, ($config | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
     $info = [Diagnostics.ProcessStartInfo]::new()
     $info.FileName = (Get-Process -Id $PID).Path
     $info.UseShellExecute=$false; $info.CreateNoWindow=$true; $info.WindowStyle=[Diagnostics.ProcessWindowStyle]::Hidden
+    $info.RedirectStandardOutput=$true; $info.RedirectStandardError=$true
     foreach ($argument in @('-NoProfile','-File',(Join-Path $ProjectRoot '启停工具.ps1'),'-ChildConfig',$configPath)) { $info.ArgumentList.Add($argument) }
-    $supervisor = [Diagnostics.Process]::Start($info)
+    $supervisor = Start-LifecycleSupervisor $info
+    # A detached logger must not keep the launcher's console/automation pipes open.
+    [void]$supervisor.StandardOutput.BaseStream.CopyToAsync([IO.Stream]::Null)
+    [void]$supervisor.StandardError.BaseStream.CopyToAsync([IO.Stream]::Null)
     $supervisorIdentity = Get-ProcessIdentity -ProcessId $supervisor.Id -ProjectRoot $ProjectRoot -Name "$Name-logger"
+    $identity=$null
     try {
-        Wait-LifecycleCondition -TimeoutSeconds 15 -Description "$Name 进程身份记录" -Condition { Test-Path -LiteralPath $config.identityPath }
+        if (-not (Test-ProcessIdentity $supervisorIdentity)) { throw "$Name 日志进程身份记录失败，未许可启动应用。" }
+        $supervisorIdentity.launchConfigPath=$configPath
+        if ($OnIdentity) { & $OnIdentity $supervisorIdentity | Out-Null }
+        # No application can exist until its recorded supervisor is recoverable.
+        [IO.File]::WriteAllText($config.gatePath,'start',[Text.UTF8Encoding]::new($false))
+        Wait-LifecycleCondition -TimeoutSeconds 15 -Description "$Name 进程身份记录" -Condition { Test-Path -LiteralPath $config.identityPath -PathType Leaf }
         $identity = Get-Content -LiteralPath $config.identityPath -Raw | ConvertFrom-Json -AsHashtable
         if (-not (Test-ProcessIdentity $identity)) { throw "$Name 启动后立即退出，请检查 $LogDirectory。" }
+        if ($OnIdentity) { & $OnIdentity $identity | Out-Null }
         return @($identity, $supervisorIdentity)
     } catch {
-        Stop-OwnedProcess $supervisorIdentity
+        try { if ($identity) { Stop-OwnedProcess $identity }; Stop-OwnedProcess $supervisorIdentity } catch { Write-Warning '本次应用进程清理失败，请依据已保存状态执行停止。' }
         throw
     } finally {
-        Remove-Item -LiteralPath $configPath -Force -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath $config.identityPath -Force -ErrorAction SilentlyContinue
+        Remove-LifecycleLaunchFiles $configPath $ProjectRoot
     }
 }
 
 if ($ChildConfig) {
     $configuration = Get-Content -LiteralPath $ChildConfig -Raw | ConvertFrom-Json -AsHashtable
-    $childInfo = [Diagnostics.ProcessStartInfo]::new()
-    $childInfo.FileName=$configuration.filePath; $childInfo.WorkingDirectory=$configuration.workingDirectory
-    $childInfo.UseShellExecute=$false; $childInfo.CreateNoWindow=$true; $childInfo.RedirectStandardOutput=$true; $childInfo.RedirectStandardError=$true
-    foreach ($argument in $configuration.arguments) { $childInfo.ArgumentList.Add($argument) }
-    $childProcess = [Diagnostics.Process]::Start($childInfo)
-    $outStream = [IO.FileStream]::new($configuration.stdout, [IO.FileMode]::Create, [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite, 1, [IO.FileOptions]::Asynchronous)
-    $errStream = [IO.FileStream]::new($configuration.stderr, [IO.FileMode]::Create, [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite, 1, [IO.FileOptions]::Asynchronous)
+    $outStream=$null; $errStream=$null; $childProcess=$null
     try {
+        Wait-LifecycleCondition -TimeoutSeconds 15 -Description '应用启动许可' -Condition { Test-Path -LiteralPath $configuration.gatePath -PathType Leaf }
+        # Validate both output resources before an application can exist.
+        $outStream = [IO.FileStream]::new($configuration.stdout, [IO.FileMode]::Create, [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite, 1, [IO.FileOptions]::Asynchronous)
+        $errStream = [IO.FileStream]::new($configuration.stderr, [IO.FileMode]::Create, [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite, 1, [IO.FileOptions]::Asynchronous)
+        $childInfo = [Diagnostics.ProcessStartInfo]::new()
+        $childInfo.FileName=$configuration.filePath; $childInfo.WorkingDirectory=$configuration.workingDirectory
+        $childInfo.UseShellExecute=$false; $childInfo.CreateNoWindow=$true; $childInfo.RedirectStandardOutput=$true; $childInfo.RedirectStandardError=$true
+        foreach ($argument in $configuration.arguments) { $childInfo.ArgumentList.Add($argument) }
+        $childProcess = [Diagnostics.Process]::Start($childInfo)
         $outCopy=$childProcess.StandardOutput.BaseStream.CopyToAsync($outStream)
         $errCopy=$childProcess.StandardError.BaseStream.CopyToAsync($errStream)
         $identity = Get-ProcessIdentity -ProcessId $childProcess.Id -ProjectRoot $configuration.projectRoot -Name $configuration.name
+        if (-not $identity) { throw '无法记录本次应用身份，已拒绝继续启动。' }
         $identityTemporary="$($configuration.identityPath).tmp"
         [IO.File]::WriteAllText($identityTemporary, ($identity | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
-        Move-Item -LiteralPath $identityTemporary -Destination $configuration.identityPath -Force
-        $childProcess.WaitForExit()
+        if (Test-Path -LiteralPath $configuration.identityPath -PathType Container) { throw '进程身份发布路径是目录，已拒绝继续启动。' }
+        Move-Item -LiteralPath $identityTemporary -Destination $configuration.identityPath -Force -ErrorAction Stop
+        while (-not $childProcess.WaitForExit(250)) {
+            if ($outCopy.IsFaulted) { [void]$outCopy.GetAwaiter().GetResult() }
+            if ($errCopy.IsFaulted) { [void]$errCopy.GetAwaiter().GetResult() }
+        }
         [void]$outCopy.GetAwaiter().GetResult(); [void]$errCopy.GetAwaiter().GetResult()
-    } finally { $outStream.Dispose(); $errStream.Dispose() }
-    exit $childProcess.ExitCode
+        $childExit=$childProcess.ExitCode
+    } catch {
+        # This is the exact Process object just created above, not a PID lookup.
+        # A failed identity publication must never orphan an unrecorded service.
+        if ($childProcess -and -not $childProcess.HasExited) {
+            $childProcess.Kill($true)
+            if (-not $childProcess.WaitForExit(5000)) { throw '本次应用初始化失败且回收超时，请根据已保存的日志进程状态重试停止。' }
+        }
+        throw
+    } finally {
+        if ($outStream) { $outStream.Dispose() }
+        if ($errStream) { $errStream.Dispose() }
+        if ($childProcess) { $childProcess.Dispose() }
+        Remove-LifecycleLaunchFiles $ChildConfig $configuration.projectRoot
+    }
+    exit $childExit
 }

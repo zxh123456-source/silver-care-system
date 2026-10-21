@@ -17,10 +17,24 @@ import venv
 from unittest import mock
 
 import startup_acceptance
+from startup_system_checks import process_key
 
 
 ROOT = Path(__file__).resolve().parents[1]
 PWSH = shutil.which("pwsh")
+
+
+class EvidenceIdentityTests(unittest.TestCase):
+    def test_same_creation_time_survives_json_precision_and_timezone_formatting(self):
+        original = {"pid": 9, "createdUtc": "2026-10-21T14:40:18.1995150Z"}
+        restored = {"pid": 9, "createdUtc": "2026-10-21T22:40:18.199515+08:00"}
+        self.assertEqual(process_key(original), process_key(restored))
+
+    def test_pid_or_real_creation_time_change_is_not_an_idempotent_start(self):
+        original = {"pid": 9, "createdUtc": "2026-10-21T14:40:18.199515Z"}
+        for changed in ({"pid": 10, "createdUtc": original["createdUtc"]},
+                        {"pid": 9, "createdUtc": "2026-10-21T14:40:18.199516Z"}):
+            self.assertNotEqual(process_key(original), process_key(changed))
 
 
 class CleanAcceptanceCopyTests(unittest.TestCase):
@@ -122,7 +136,7 @@ class LifecycleTests(unittest.TestCase):
             worker.stderr.close()
         self.temp.cleanup()
 
-    def ps(self, body, *, success=True, extra=None):
+    def ps(self, body, *, success=True, extra=None, detached_output=False):
         script = self.folder / "外部 调用.ps1"
         script.write_text(
             "$ErrorActionPreference='Stop'\n"
@@ -132,10 +146,19 @@ class LifecycleTests(unittest.TestCase):
                    SC_ROOT=str(self.root), SC_PYTHON=sys.executable)
         if extra:
             env.update({key: str(value) for key, value in extra.items()})
-        result = subprocess.run(
-            [PWSH, "-NoProfile", "-NonInteractive", "-File", str(script)],
-            cwd=self.folder, env=env, text=True, encoding="utf-8",
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=40)
+        command = [PWSH, "-NoProfile", "-NonInteractive", "-File", str(script)]
+        if detached_output:
+            # An orphan logger inherits handles. Files let us wait for just the
+            # killed caller, then recover the logger in a separate invocation.
+            with (self.folder / "caller.stdout").open("w+b") as out, (self.folder / "caller.stderr").open("w+b") as err:
+                result = subprocess.run(command, cwd=self.folder, env=env, stdout=out, stderr=err, timeout=40)
+                out.seek(0)
+                err.seek(0)
+                result.stdout = out.read().decode("utf-8")
+                result.stderr = err.read().decode("utf-8")
+        else:
+            result = subprocess.run(command, cwd=self.folder, env=env, text=True, encoding="utf-8",
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=40)
         if success:
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         else:
@@ -393,11 +416,24 @@ $logs=Join-Path $env:SC_ROOT '.runtime/logs'
 New-Item -ItemType Directory -Force -Path $logs | Out-Null
 $arguments=@((Join-Path $env:SC_ROOT 'argument recorder.py')) + @(Get-Content (Join-Path $env:SC_ROOT 'arguments.json') -Raw | ConvertFrom-Json)
 $identities=@()
+$checkpointState=@{schemaVersion=1;projectRoot=$env:SC_ROOT;composeProject='quoting';processes=@();containers=@()}
+$checkpointPath=Join-Path $env:SC_ROOT '.runtime/lifecycle-quoting.json'
+$checkpointProcesses=[Collections.Generic.List[object]]::new()
+$checkpointCounts=[Collections.Generic.List[int]]::new()
+$saveCheckpoint=${function:Save-LifecycleState}
+$checkpoint={param($identity)
+    $checkpointState.processes=@($checkpointState.processes)+@($identity)
+    $checkpointProcesses.Add($identity)
+    & $saveCheckpoint $checkpointState $checkpointPath
+    $persisted=Get-Content -LiteralPath $checkpointPath -Raw | ConvertFrom-Json -AsHashtable
+    $checkpointCounts.Add($persisted.processes.Count)
+}.GetNewClosure()
 try {
-    $identities=@(Start-LifecycleProcess -Name 'quoting' -FilePath $env:SC_PYTHON -Arguments $arguments -WorkingDirectory $env:SC_ROOT -ProjectRoot $env:SC_ROOT -LogDirectory $logs)
+    $identities=@(Start-LifecycleProcess -Name 'quoting' -FilePath $env:SC_PYTHON -Arguments $arguments -WorkingDirectory $env:SC_ROOT -ProjectRoot $env:SC_ROOT -LogDirectory $logs -OnIdentity $checkpoint)
     Wait-LifecycleCondition -TimeoutSeconds 10 -Description 'test output' -Condition {(Get-Item (Join-Path $logs 'quoting.log')).Length -gt 0}
     $values=Get-Content (Join-Path $logs 'quoting.log') -Raw -Encoding UTF8 | ConvertFrom-Json
-    $answer=@{arguments=@($values);identityCount=$identities.Count;allOwned=(@($identities | Where-Object {-not (Test-ProcessIdentity $_)}).Count -eq 0)}
+    $saved=Read-LifecycleState -Path $checkpointPath -ProjectRoot $env:SC_ROOT -ComposeProject 'quoting'
+    $answer=@{arguments=@($values);identityCount=$identities.Count;allOwned=(@($identities | Where-Object {-not (Test-ProcessIdentity $_)}).Count -eq 0);checkpointNames=@($saved.processes | ForEach-Object name);checkpointCounts=$checkpointCounts.ToArray();newProcessCount=$checkpointProcesses.Count}
 } catch {
     Get-ChildItem -LiteralPath $logs -Filter '*.log' | ForEach-Object {Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8 | Out-Host}
     throw
@@ -408,6 +444,157 @@ try {
         self.assertEqual(answer["arguments"], arguments)
         self.assertEqual(answer["identityCount"], 2)
         self.assertTrue(answer["allOwned"])
+        self.assertEqual(answer["checkpointNames"], ["quoting-logger", "quoting"])
+        self.assertEqual(answer["checkpointCounts"], [1, 2])
+        self.assertEqual(answer["newProcessCount"], 2)
+
+    def gated_launcher_fixture(self):
+        shutil.copyfile(ROOT / "启停工具.ps1", self.root / "启停工具.ps1")
+        script = self.root / "gated app.py"
+        script.write_text("import os,sys,time\nfrom pathlib import Path\nPath(sys.argv[1]).write_text(str(os.getpid()),encoding='utf-8')\nprint('application ready',flush=True)\ntime.sleep(120)\n", encoding="utf-8")
+        return """
+$logs=Join-Path $env:SC_ROOT '.runtime/logs'
+New-Item -ItemType Directory -Force -Path $logs | Out-Null
+$statePath=Join-Path $env:SC_ROOT '.runtime/lifecycle-gated.json'
+$state=@{schemaVersion=1;projectRoot=$env:SC_ROOT;composeProject='gated';processes=@();containers=@()}
+$saveCheckpoint=${function:Save-LifecycleState}
+$marker=Join-Path $env:SC_ROOT 'app-started.txt'
+$observed=Join-Path $env:SC_ROOT 'observed-identity.json'
+$launch=@{Name='gated';FilePath=$env:SC_PYTHON;Arguments=@((Join-Path $env:SC_ROOT 'gated app.py'),$marker);WorkingDirectory=$env:SC_ROOT;ProjectRoot=$env:SC_ROOT;LogDirectory=$logs}
+"""
+
+    def test_launcher_parent_killed_before_permission_never_spawns_app_and_logger_exits(self):
+        setup = self.gated_launcher_fixture()
+        self.ps(setup + """
+$callback={param($identity)
+    $identity | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $observed
+    Stop-Process -Id $PID -Force
+}.GetNewClosure()
+Start-LifecycleProcess @launch -OnIdentity $callback
+""", success=False, detached_output=True)
+        answer = self.result("""
+$identity=Get-Content -LiteralPath (Join-Path $env:SC_ROOT 'observed-identity.json') -Raw | ConvertFrom-Json -AsHashtable
+try {
+    Wait-LifecycleCondition -TimeoutSeconds 25 -Description 'unpermitted logger exit' -Condition {-not (Test-ProcessIdentity $identity)}
+    $answer=@{loggerAlive=(Test-ProcessIdentity $identity);appStarted=(Test-Path -LiteralPath (Join-Path $env:SC_ROOT 'app-started.txt'));stateExists=(Test-Path -LiteralPath (Join-Path $env:SC_ROOT '.runtime/lifecycle-gated.json'))}
+} finally {Stop-OwnedProcess $identity}
+""")
+        self.assertEqual(answer, {"loggerAlive": False, "appStarted": False, "stateExists": False})
+
+    def test_launcher_parent_killed_after_permission_is_recoverable_from_saved_logger(self):
+        setup = self.gated_launcher_fixture()
+        self.ps(setup + """
+$callback={param($identity)
+    if ($identity.name -like '*-logger') {
+        $state.processes+=@($identity)
+        & $saveCheckpoint $state $statePath
+    } else {
+        Wait-LifecycleCondition -TimeoutSeconds 10 -Description 'self-owned app marker' -Condition {Test-Path -LiteralPath $marker}
+        $identity | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $observed
+        Stop-Process -Id $PID -Force
+    }
+}.GetNewClosure()
+Start-LifecycleProcess @launch -OnIdentity $callback
+""", success=False)
+        answer = self.result("""
+$saved=Read-LifecycleState -Path (Join-Path $env:SC_ROOT '.runtime/lifecycle-gated.json') -ProjectRoot $env:SC_ROOT -ComposeProject 'gated'
+$logger=$saved.processes[0]
+$app=Get-Content -LiteralPath (Join-Path $env:SC_ROOT 'observed-identity.json') -Raw | ConvertFrom-Json -AsHashtable
+$answer=@{savedCount=$saved.processes.Count;loggerName=$logger.name;loggerBefore=(Test-ProcessIdentity $logger);appBefore=(Test-ProcessIdentity $app);appStarted=(Test-Path -LiteralPath (Join-Path $env:SC_ROOT 'app-started.txt'))}
+try {
+    Stop-OwnedProcess $logger
+    $answer.loggerAfter=Test-ProcessIdentity $logger
+    $answer.appAfter=Test-ProcessIdentity $app
+} finally {
+    Stop-OwnedProcess $app
+    Stop-OwnedProcess $logger
+}
+""")
+        self.assertEqual(answer, {"savedCount": 1, "loggerName": "gated-logger", "loggerBefore": True,
+                                  "appBefore": True, "appStarted": True, "loggerAfter": False, "appAfter": False})
+
+    def test_launcher_checkpoint_failure_before_permission_does_not_spawn_app(self):
+        setup = self.gated_launcher_fixture()
+        (self.root / "blocked-directory").write_text("a file cannot contain a state file", encoding="utf-8")
+        answer = self.result(setup + """
+$callback={param($identity)
+    $identity | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $observed
+    & $saveCheckpoint $state (Join-Path $env:SC_ROOT 'blocked-directory/state.json')
+}.GetNewClosure()
+$failed=$false
+try {Start-LifecycleProcess @launch -OnIdentity $callback | Out-Null} catch {$failed=$true}
+$logger=Get-Content -LiteralPath $observed -Raw | ConvertFrom-Json -AsHashtable
+try {$answer=@{failed=$failed;appStarted=(Test-Path -LiteralPath $marker);loggerAlive=(Test-ProcessIdentity $logger)}}
+finally {Stop-OwnedProcess $logger}
+""")
+        self.assertEqual(answer, {"failed": True, "appStarted": False, "loggerAlive": False})
+
+    def test_launcher_checkpoint_failure_after_spawn_rolls_back_logger_and_app(self):
+        setup = self.gated_launcher_fixture()
+        (self.root / "blocked-directory").write_text("a file cannot contain a state file", encoding="utf-8")
+        answer = self.result(setup + """
+$callback={param($identity)
+    if ($identity.name -like '*-logger') {
+        $state.processes+=@($identity)
+        & $saveCheckpoint $state $statePath
+    } else {
+        Wait-LifecycleCondition -TimeoutSeconds 10 -Description 'self-owned app marker' -Condition {Test-Path -LiteralPath $marker}
+        $identity | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $observed
+        & $saveCheckpoint $state (Join-Path $env:SC_ROOT 'blocked-directory/state.json')
+    }
+}.GetNewClosure()
+$failed=$false
+try {Start-LifecycleProcess @launch -OnIdentity $callback | Out-Null} catch {$failed=$true}
+$logger=$state.processes[0]
+$app=Get-Content -LiteralPath $observed -Raw | ConvertFrom-Json -AsHashtable
+try {$answer=@{failed=$failed;appStarted=(Test-Path -LiteralPath $marker);loggerAlive=(Test-ProcessIdentity $logger);appAlive=(Test-ProcessIdentity $app)}}
+finally {Stop-OwnedProcess $app; Stop-OwnedProcess $logger}
+""")
+        self.assertEqual(answer, {"failed": True, "appStarted": True, "loggerAlive": False, "appAlive": False})
+
+    def io_fault_launcher(self, fault):
+        setup = self.gated_launcher_fixture()
+        # A silent server can survive a logger's broken output pipes. Observe
+        # its own marker before cleanup, so cleanup cannot mask an orphan.
+        (self.root / "gated app.py").write_text("import os,sys,time\nfrom pathlib import Path\nPath(sys.argv[1]).write_text(str(os.getpid()),encoding='utf-8')\ntime.sleep(120)\n", encoding="utf-8")
+        (self.root / "app-started.txt").unlink(missing_ok=True)
+        return self.result(setup + """
+$callback={param($identity)
+    $state.processes=@($state.processes)+@($identity)
+    & $saveCheckpoint $state $statePath
+    if ($identity.name -like '*-logger' -and $env:SC_IO_FAULT -eq 'identity') {
+        New-Item -ItemType Directory -Path ($identity.launchConfigPath+'.identity.tmp') | Out-Null
+    }
+}.GetNewClosure()
+$app=$null
+$failed=$false
+try {
+    try {Start-LifecycleProcess @launch -OnIdentity $callback | Out-Null} catch {$failed=$true}
+    if (Test-Path -LiteralPath $marker) {
+        $applicationId=[int](Get-Content -LiteralPath $marker -Raw)
+        $app=Get-ProcessIdentity -ProcessId $applicationId -ProjectRoot $env:SC_ROOT -Name 'io-probe'
+    }
+    $answer=@{failed=$failed;appAlive=(Test-ProcessIdentity $app);loggerAlive=(@($state.processes | Where-Object {Test-ProcessIdentity $_}).Count -gt 0)}
+} finally {
+    if ($app) {Stop-OwnedProcess $app}
+    foreach ($identity in $state.processes) {Stop-OwnedProcess $identity}
+}
+""", extra={"SC_IO_FAULT": fault})
+
+    def test_launcher_log_open_failure_does_not_leave_application_alive(self):
+        for name in ("gated.log", "gated.err.log"):
+            with self.subTest(blocked_stream=name):
+                blocked = self.root / ".runtime/logs" / name
+                blocked.mkdir(parents=True)
+                try:
+                    answer = self.io_fault_launcher("logs")
+                    self.assertEqual(answer, {"failed": True, "appAlive": False, "loggerAlive": False})
+                finally:
+                    blocked.rmdir()
+
+    def test_launcher_identity_publication_failure_does_not_leave_application_alive(self):
+        answer = self.io_fault_launcher("identity")
+        self.assertEqual(answer, {"failed": True, "appAlive": False, "loggerAlive": False})
 
     def test_container_labels_are_verified_before_stop_using_fake_docker(self):
         identity = {"id": "a" * 64, "service": "mysql", "composeProject": "test-project",

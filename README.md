@@ -208,3 +208,23 @@ docker rm -f silvercare-e2e-local
 该命令会重置指定测试容器中的 `db_beadhouse`，只允许在可丢弃库中运行。脚本要求显式 `--disposable-test`，本地容器名必须以 `silvercare-e2e-` 开头；固定测试端口为13318、16390和19001，需保持空闲。每次生成临时登录密码，结束时清理自己启动的 Redis 和后端进程。证据保存在 Git 忽略的 `.runtime/e2e/<运行编号>/`，仅使用虚构演示数据。
 
 PowerShell 下运行后端测试时，设置仅用于测试的 `JWT_SECRET`（至少32字节）、`LEGACY_AES_IV`（16字节）和 `LEGACY_AES_KEY`（16字节）再执行 `mvn test`。这些只用于合成测试，不需要生产密钥。Redis 并发测试需要单独的临时 Redis 并设置 `RESET_TEST_REDIS_PORT`。Python 执行 `python -m pytest -q` 覆盖缺失、弱令牌和 Milvus 凭据校验；执行真实 RAG 评测前须提供有效 `RAG_INTERNAL_TOKEN`。
+
+## 完整一键启动验收
+
+Windows 上的 `python tools/startup_acceptance.py --action fresh` 会把当前已跟踪源码复制到 `.runtime/startup-check/<运行编号>/中文 空格 项目`，自动分配独立端口与 Compose 项目、新建数据卷，并实际调用 `启动AI养老院.ps1 -Prepare -InitializeDemo -AcknowledgeDemoOnly`。不会复制源项目的私有配置、依赖、构建产物或业务数据；先将新增公开脚本加入 Git 跟踪。已有的软件包、镜像、模型下载缓存可复用，因此不等同于新装操作系统或无缓存联网安装验收。
+
+启动后默认保留隔离服务供业务验收，输出的 `acceptance.json` 是该次运行的恢复入口。下面的 `RUN`、`COPY`、`PORT` 用该次输出值替换，业务浏览器脚本另需 `.github/e2e/requirements.txt` 和已安装的 Chromium：
+
+```powershell
+python tools/startup_business_smoke.py --project-root "COPY" --frontend-port PORT --evidence "RUN" --phase write
+python tools/startup_system_checks.py --manifest "RUN/acceptance.json" --phase running
+python tools/startup_business_smoke.py --project-root "COPY" --frontend-port PORT --evidence "RUN" --phase verify
+python tools/startup_system_checks.py --manifest "RUN/acceptance.json" --phase recovery
+python tools/startup_system_checks.py --manifest "RUN/acceptance.json" --phase repair
+python tools/startup_business_smoke.py --project-root "COPY" --frontend-port PORT --evidence "RUN" --phase verify
+python tools/startup_acceptance.py --manifest "RUN/acceptance.json" --action stop
+```
+
+这组检查覆盖真实登录、老人测量写入与复读、Java异步制度同步到Python/Milvus及可见引用、重复启动、记录端口重启、缺配置停止、外来监听拒绝、失败回滚，以及只修复前端失败时保留原Java/RAG和五个容器。运行环境与首次启动保持一致（JDK 8、工具路径、模型缓存等）；证据、日志和截图留在该次被Git忽略的目录，停止保留卷，不操作日常数据库。浏览器人工复核可用独立命名的 `playwright-cli` 会话完成；不要把凭据放进命令行或提交截图中的私人数据。
+
+本轮没有进行旧依赖升级：2026-10-21 的 `npm ci` 报告98项审计告警（10低、44中、38高、6严重），尚需单独评估与修复，不能把构建成功解释为依赖安全审计通过。真实SMTP、付费模型、OCR中文模型和其他浏览器/移动端不属于本次启动闭环的已验证范围。
