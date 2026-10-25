@@ -390,9 +390,11 @@ function Invoke-LifecycleCommandWorker {
         $info=[Diagnostics.ProcessStartInfo]::new()
         $info.FileName=$payload.filePath; $info.WorkingDirectory=$payload.workingDirectory
         $info.UseShellExecute=$false; $info.CreateNoWindow=$true
+        $info.RedirectStandardInput=$true
         $info.RedirectStandardOutput=$true; $info.RedirectStandardError=$true
         foreach ($argument in $payload.arguments) { $info.ArgumentList.Add([string]$argument) }
         $child=[Diagnostics.Process]::Start($info)
+        $child.StandardInput.Close()
         $stdout=$child.StandardOutput.BaseStream.CopyToAsync([Console]::OpenStandardOutput())
         $stderr=$child.StandardError.BaseStream.CopyToAsync([Console]::OpenStandardError())
         $child.WaitForExit()

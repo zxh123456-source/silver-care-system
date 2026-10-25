@@ -365,6 +365,36 @@ $answer=@{reported=(Get-Content -LiteralPath $log -Raw | ConvertFrom-Json);calle
         self.assertEqual(answer["reported"], {"arguments": arguments, "cwd": str(self.root)})
         self.assertEqual(answer["callerCodePage"], 437)
 
+    def test_dependency_worker_gives_command_eof_while_control_pipe_stays_open(self):
+        # The JSON channel belongs only to the worker. Its child must receive
+        # EOF independently of whether the caller has closed that channel.
+        payload = dict(filePath=sys.executable, workingDirectory=str(self.root),
+                       arguments=["-c", "import sys; print('READER_STARTED',flush=True); print('EOF:'+repr(sys.stdin.read()),flush=True)"])
+        stdout = self.folder / "worker-stdin.stdout"
+        stderr = self.folder / "worker-stdin.stderr"
+        with stdout.open("wb") as output, stderr.open("wb") as error:
+            worker = subprocess.Popen([PWSH, "-NoProfile", "-NonInteractive", "-File",
+                                       str(ROOT / "启停工具.ps1"), "-CommandWorker"],
+                                      stdin=subprocess.PIPE, stdout=output, stderr=error)
+            try:
+                worker.stdin.write((json.dumps(payload) + "\n").encode("utf-8"))
+                worker.stdin.flush()
+                try:
+                    worker.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self.assertIn("READER_STARTED", stdout.read_text(encoding="utf-8"),
+                                  "The reader must have started before diagnosing a blocked stdin")
+                    self.fail("Command inherited the still-open JSON control pipe instead of receiving EOF")
+            finally:
+                worker.stdin.close()
+                try:
+                    worker.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    worker.kill()
+                    worker.wait(timeout=5)
+        self.assertEqual(worker.returncode, 0, stderr.read_text(encoding="utf-8"))
+        self.assertEqual(stdout.read_text(encoding="utf-8").splitlines(), ["READER_STARTED", "EOF:''"])
+
     def test_dependency_command_closes_stdin_after_its_single_payload(self):
         answer = self.result("""
 $log=Join-Path $env:SC_ROOT 'stdin-eof.log'

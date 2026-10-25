@@ -229,7 +229,7 @@ PowerShell 下运行后端测试时，设置仅用于测试的 `JWT_SECRET`（�
 
 Windows 上的 `python tools/startup_acceptance.py --action fresh` 会把当前已跟踪源码复制到 `.runtime/startup-check/<运行编号>/中文 空格 项目`，自动分配独立端口与 Compose 项目、新建数据卷，并实际调用 `启动AI养老院.ps1 -Prepare -InitializeDemo -AcknowledgeDemoOnly`。不会复制源项目的私有配置、依赖、构建产物或业务数据；先将新增公开脚本加入 Git 跟踪。已有的软件包、镜像、模型下载缓存可复用，因此不等同于新装操作系统或无缓存联网安装验收。
 
-每次启动的前置命令写入 `.runtime/logs/<ComposeProject>/commands/<运行ID>/`：保留各自stdout、`.stderr`、`.events.jsonl`及`startup-events.jsonl`，后续启动不会覆盖这一组证据。事件只记录阶段、时间、耗时、结果和worker PID，不记录命令参数或环境变量。parent与worker的专用stdin协议显式UTF-8，保证英文OEM系统下中文路径/参数不损坏，不修改调用者控制台编码。应用日志仍在原目录。应用的`.log.supervisor.events.jsonl`另外记录logger/child PID、退出码和异常类别，区分应用先退与日志进程异常清理；不记录argv/env。长应用stdin由logger独立持有，不依赖调用者输入管道寿命。
+每次启动的前置命令写入 `.runtime/logs/<ComposeProject>/commands/<运行ID>/`：保留各自stdout、`.stderr`、`.events.jsonl`及`startup-events.jsonl`，后续启动不会覆盖这一组证据。事件只记录阶段、时间、耗时、结果和worker PID，不记录命令参数或环境变量。parent与worker的专用stdin协议显式UTF-8，保证英文OEM系统下中文路径/参数不损坏，不修改调用者控制台编码。实际短命命令使用另外的stdin并立即关闭为EOF，不继承JSON控制管道；长应用的stdin由logger持续持有。应用日志仍在原目录。应用的`.log.supervisor.events.jsonl`另外记录logger/child PID、退出码和异常类别，区分应用先退与日志进程异常清理；不记录argv/env。长应用stdin由logger独立持有，不依赖调用者输入管道寿命。
 
 Docker/JDK/Python前置检查和Milvus认证命令使用当前`-TimeoutSeconds`预算；预算包含命令与输出管道完成。完整`-Prepare`构建/依赖安装保持单独的长任务语义，不使用健康探针预算。每个短命命令使用独立Windows Job和门控worker，超时或启动器退出时只回收该命令树（[Windows Job说明](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)）。前端单独修复若复用已登记RAG进程，不重复导入ML依赖，仍执行真实身份、BGE和Milvus认证检查。
 
