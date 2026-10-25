@@ -397,10 +397,30 @@ $answer=@{reported=(Get-Content -LiteralPath $log -Raw | ConvertFrom-Json);calle
 
     def test_dependency_command_closes_stdin_after_its_single_payload(self):
         answer = self.result("""
+# Compile the fixture's Windows job support before measuring stdin behavior.
+# No job or subprocess is created here; Invoke retains its own 3-second budget.
+$setupTimer=[Diagnostics.Stopwatch]::StartNew()
+Initialize-LifecycleCommandJob
+$setupTimer.Stop()
+$stats=@{powershellVersion=$PSVersionTable.PSVersion.ToString();jobInitializationMilliseconds=$setupTimer.ElapsedMilliseconds}
+$statsPath=Join-Path $env:SC_ROOT 'stdin-eof.stats.json'
+[IO.File]::WriteAllText($statsPath,($stats | ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false))
 $log=Join-Path $env:SC_ROOT 'stdin-eof.log'
+try {
 Invoke-LifecycleCommand -FilePath $env:SC_PYTHON -Arguments @('-c','import sys; print("EOF:"+repr(sys.stdin.read()),flush=True)') -WorkingDirectory $env:SC_ROOT -LogPath $log -TimeoutSeconds 3
 $answer=Get-Content -LiteralPath $log -Raw
+} catch {
+    Write-Host ('SC_EOF_SETUP:' + (Get-Content -LiteralPath $statsPath -Raw))
+    if(Test-Path -LiteralPath "$log.events.jsonl") {
+        foreach($line in Get-Content -LiteralPath "$log.events.jsonl") {
+            $event=$line | ConvertFrom-Json | Select-Object event,elapsedMilliseconds,timeoutSeconds,exitCode
+            Write-Host ('SC_EOF_EVENT:' + ($event | ConvertTo-Json -Compress))
+        }
+    }
+    throw
+}
 """)
+        print("SC_EOF_SETUP:" + (self.root / "stdin-eof.stats.json").read_text(encoding="utf-8").strip(), flush=True)
         self.assertEqual(answer.strip(), "EOF:''")
 
     def worker(self, *, root=None):
