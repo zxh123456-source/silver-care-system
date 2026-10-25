@@ -146,8 +146,9 @@
 </template>
 
 <script lang="ts" setup>
-import { onMounted, reactive, ref } from "vue";
-import { ElMessage, ElMessageBox, FormInstance, FormRules } from "element-plus";
+import { handleRequestFailure } from "@/utils/requestFailure";
+import { reactive, ref } from "vue";
+import { ElMessage, FormInstance, FormRules } from "element-plus";
 
 import {
   listConsultSource,
@@ -304,7 +305,7 @@ const acceptParams = async (params: DialogProps) => {
 //点击提交
 const handleSubmit = async (formRef: FormInstance | null) => {
   if (!formRef) return;
-  formRef.validate(async (valid, fields) => {
+  formRef.validate(async (valid) => {
     if (valid) {
       try {
         const res = await drawerProps.value.api!(formData.value);
@@ -320,10 +321,10 @@ const handleSubmit = async (formRef: FormInstance | null) => {
           });
         }
       } catch (error) {
-        console.log(error);
+        handleRequestFailure(error);
       }
     } else {
-      return fields;
+      return;
     }
   });
 };

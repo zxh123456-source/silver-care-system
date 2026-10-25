@@ -1,136 +1,223 @@
-$ErrorActionPreference = "Stop"
-
-$projectRoot = $PSScriptRoot
-$runtimeDir = Join-Path $projectRoot ".runtime"
-$logDir = Join-Path $runtimeDir "logs"
+[CmdletBinding()]
+param(
+    [switch]$Prepare, [switch]$InitializeDemo, [switch]$AcknowledgeDemoOnly,
+    [string]$ComposeProject,
+    [int]$MysqlPort, [int]$RedisPort, [int]$MilvusPort, [int]$MilvusHealthPort,
+    [int]$RagPort, [int]$BackendPort, [int]$FrontendPort,
+    [ValidateRange(1,3600)][int]$TimeoutSeconds=300
+)
+$ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot '启停工具.ps1')
+Assert-LifecycleHost
+if ($InitializeDemo -and -not $AcknowledgeDemoOnly) { throw '-InitializeDemo 必须同时明确提供 -AcknowledgeDemoOnly，仅允许初始化未修改过的原始演示账户。' }
+if ($Prepare -and -not (Test-Path -LiteralPath (Join-Path $PSScriptRoot '.env'))) { & (Join-Path $PSScriptRoot '初始化本地配置.ps1') }
+Import-LifecycleEnvironment $PSScriptRoot
+$config = Get-LifecycleConfiguration -ProjectRoot $PSScriptRoot -Parameters $PSBoundParameters
+$projectRoot=$config.projectRoot; $ports=$config.ports
+$logDir = Join-Path $projectRoot ".runtime/logs/$($config.composeProject)"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+$runId=[Guid]::NewGuid().ToString('N')
+$commandLogDir=Join-Path $logDir "commands/$runId"
+New-Item -ItemType Directory -Force -Path $commandLogDir | Out-Null
+$startupClock=[Diagnostics.Stopwatch]::StartNew()
+function Write-StartupStage([string]$Name) {
+    @{runId=$runId;utc=[DateTime]::UtcNow.ToString('o');phase=$Name;elapsedMilliseconds=$startupClock.ElapsedMilliseconds} |
+        ConvertTo-Json -Compress | Add-Content -LiteralPath (Join-Path $commandLogDir 'startup-events.jsonl') -Encoding utf8
+}
+Write-Host "本次前置命令与阶段日志：$commandLogDir"
+Write-StartupStage 'lock'
 
-$dotenv = Join-Path $projectRoot ".env"
-if (Test-Path -LiteralPath $dotenv) {
-    foreach ($line in Get-Content -LiteralPath $dotenv -Encoding UTF8) {
-        if ($line -match '^\s*([A-Z][A-Z0-9_]*)\s*=\s*(.*)\s*$') {
-            [Environment]::SetEnvironmentVariable($matches[1], $matches[2].Trim('"').Trim("'"), "Process")
+$lifecycleLock=Enter-LifecycleLock $config.statePath
+try {
+    Write-StartupStage 'environment'
+    . (Join-Path $projectRoot '校验环境.ps1')
+    Assert-ProjectEnvironment
+    $docker = (Get-Command docker -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+    $node = (Get-Command $(if ($env:SILVERCARE_NODE) { $env:SILVERCARE_NODE } else { 'node' }) -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+    $java = if ($env:SILVERCARE_JAVA) { $env:SILVERCARE_JAVA } elseif ($env:JAVA_HOME) { Join-Path $env:JAVA_HOME 'bin/java.exe' } else { (Get-Command java -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source }
+    if (-not (Test-Path -LiteralPath $java)) { throw 'JAVA_HOME/SILVERCARE_JAVA 未指向有效 JDK。' }
+    Write-StartupStage 'docker-preflight'
+    Invoke-LifecycleCommand $docker @('info','--format','{{.ServerVersion}}') $projectRoot (Join-Path $commandLogDir 'docker-info.log') -TimeoutSeconds $TimeoutSeconds
+    Invoke-LifecycleCommand $docker @('compose','version','--short') $projectRoot (Join-Path $commandLogDir 'compose-version.log') -TimeoutSeconds $TimeoutSeconds
+    $env:COMPOSE_PROJECT_NAME=$config.composeProject
+    $env:MYSQL_PORT=[string]$ports.MysqlPort; $env:REDIS_PORT=[string]$ports.RedisPort
+    $env:MILVUS_PORT=[string]$ports.MilvusPort; $env:MILVUS_HEALTH_PORT=[string]$ports.MilvusHealthPort
+    $env:RAG_PORT=[string]$ports.RagPort; $env:BACKEND_PORT=[string]$ports.BackendPort; $env:FRONTEND_PORT=[string]$ports.FrontendPort
+    $env:DB_URL="jdbc:mysql://127.0.0.1:$($ports.MysqlPort)/db_beadhouse?useSSL=false&useUnicode=true&characterEncoding=utf-8&allowMultiQueries=true&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true"
+    $env:SPRING_REDIS_HOST='127.0.0.1'; $env:SPRING_REDIS_PORT=[string]$ports.RedisPort
+    $env:AI_RAG_URL="http://127.0.0.1:$($ports.RagPort)"; $env:RAG_MILVUS_URI="http://127.0.0.1:$($ports.MilvusPort)"
+    $env:RAG_BACKEND='milvus'; $env:RAG_EMBEDDING_BACKEND='fastembed'; $env:RAG_EMBEDDING_MODEL='BAAI/bge-small-zh-v1.5'; $env:RAG_DENSE_DIMENSION='512'
+    $env:SILVERCARE_BACKEND_URL="http://127.0.0.1:$($ports.BackendPort)"
+    $env:NO_PROXY='127.0.0.1,localhost'; $env:no_proxy=$env:NO_PROXY
+    if (-not $env:DB_USERNAME) { $env:DB_USERNAME='root' }
+    # Preserve the existing local OCR discovery; an explicit configuration wins.
+    if (-not $env:AI_OCR_ENABLED) {
+        $ocrData=Join-Path $projectRoot '.runtime/ocr/tessdata'
+        $ocrCandidates=@((Get-Command tesseract -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source)
+        if ($env:ProgramFiles) { $ocrCandidates+=Join-Path $env:ProgramFiles 'Tesseract-OCR/tesseract.exe' }
+        if (${env:ProgramFiles(x86)}) { $ocrCandidates+=Join-Path ${env:ProgramFiles(x86)} 'Tesseract-OCR/tesseract.exe' }
+        $ocr=$ocrCandidates | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
+        if ($ocr -and (Test-Path -LiteralPath (Join-Path $ocrData 'chi_sim.traineddata'))) {
+            $env:AI_OCR_ENABLED='true'; $env:AI_OCR_COMMAND=$ocr; $env:AI_OCR_LANGUAGE='chi_sim+eng'; $env:AI_OCR_DATA_DIR='..\..\.runtime\ocr\tessdata'
+        } else { $env:AI_OCR_ENABLED='false' }
+    }
+    if ($config.composeProject -ne 'silver-care-system') {
+        $dataDirectory=Join-Path $projectRoot ".runtime/data/$($config.composeProject)"
+        New-Item -ItemType Directory -Force -Path $dataDirectory | Out-Null
+        $env:RAG_DATA_FILE=Join-Path $dataDirectory 'policy_documents.json'
+    }
+    $fingerprint=Get-LifecycleFingerprint $projectRoot
+    $composeArguments=@('compose','--project-name',$config.composeProject,'--project-directory',$projectRoot,'-f',(Join-Path $projectRoot 'docker-compose.yml'))
+    Write-StartupStage 'configuration'
+    Invoke-LifecycleCommand $docker ($composeArguments + @('config','--quiet')) $projectRoot (Join-Path $commandLogDir 'compose-config.log') -TimeoutSeconds $TimeoutSeconds
+    Write-StartupStage 'ownership-and-ports'
+    $state=Read-LifecycleState -Path $config.statePath -ProjectRoot $projectRoot -ComposeProject $config.composeProject
+    if (-not $state) { $state=@{schemaVersion=1;projectRoot=$projectRoot;composeProject=$config.composeProject;ports=$ports;instanceId=[Guid]::NewGuid().ToString('N');processes=@();containers=@()} }
+    $liveProcesses=@($state.processes | Where-Object { Test-ProcessIdentity $_ })
+    $existingContainers=@(Get-LifecycleContainers $docker $config.composeProject $projectRoot)
+    $runningBefore=@($existingContainers | Where-Object running | ForEach-Object id)
+    if ($liveProcesses.Count -or $runningBefore.Count) {
+        foreach ($key in $ports.Keys) { if ($state.ports[$key] -ne $ports[$key]) { throw '已有本项目服务运行；修改端口前请用原 ComposeProject 停止。' } }
+        if ($state.configurationFingerprint -ne $fingerprint) { throw '正在运行的实例配置与当前配置不一致；请先停止再启动，未修改原有服务。' }
+    }
+    foreach ($container in $existingContainers) {
+        if ($container.running -and @($state.containers | Where-Object id -EQ $container.id).Count -ne 1) { throw '发现未由启停状态登记的运行容器；请使用另一个 ComposeProject，不能接管现有服务。' }
+    }
+    foreach ($name in @('rag','backend','frontend')) {
+        $key=@{rag='RagPort';backend='BackendPort';frontend='FrontendPort'}[$name]
+        $identity=$liveProcesses | Where-Object name -EQ $name | Select-Object -First 1
+        Assert-LifecyclePort $ports[$key] $identity
+    }
+    foreach ($entry in @(@('mysql','MysqlPort',3306),@('redis','RedisPort',6379),@('milvus','MilvusPort',19530),@('milvus','MilvusHealthPort',9091))) {
+        $container=$existingContainers | Where-Object { $_.service -eq $entry[0] -and $_.running } | Select-Object -First 1
+        $owned=$false
+        if ($container) {
+            $owned=Test-ContainerPublishedPort $container $docker $ports[$entry[1]] $entry[2]
+            if (-not $owned) { throw '现有容器端口映射与本实例配置不一致。' }
+        }
+        Assert-LifecyclePort -Port $ports[$entry[1]] -OwnedContainer $owned
+    }
+    $aiDir=Join-Path $projectRoot '源码/beadhouse-ai'; $backendDir=Join-Path $projectRoot '源码/beadhouse-backend'; $frontendDir=Join-Path $projectRoot '源码/beadhouse-frontend'
+    $python=Get-WindowsToolPath (Join-Path $aiDir '.venv/Scripts/python.exe'); $jar=Join-Path $backendDir 'target/beadhouse-backend-0.0.1-SNAPSHOT.jar'
+    $vite=Join-Path $frontendDir 'node_modules/vite/bin/vite.js'
+    Write-StartupStage 'artifacts'
+    Invoke-LifecycleCommand $java @('-version') $backendDir (Join-Path $commandLogDir 'java-version.log') -TimeoutSeconds $TimeoutSeconds
+    $javaVersion=(Get-Content -LiteralPath (Join-Path $commandLogDir 'java-version.log') -Raw) + (Get-Content -LiteralPath (Join-Path $commandLogDir 'java-version.log.stderr') -Raw)
+    if ($javaVersion -notmatch 'version "1\.8\.') { throw '本项目要求 JDK 8；请设置 JAVA_HOME 或 SILVERCARE_JAVA。' }
+    $env:JAVA_HOME=Split-Path (Split-Path $java)
+    if ($Prepare) {
+        if ($liveProcesses.Count) { throw 'Prepare 需要应用已停止，避免覆盖运行中的依赖或 JAR。' }
+        if (-not (Test-Path -LiteralPath (Join-Path $env:JAVA_HOME 'bin/javac.exe'))) { throw 'Prepare 要求完整 JDK 8（含 javac），不能使用 JRE。' }
+        Write-Host "准备后端 JAR；日志：$(Join-Path $commandLogDir 'prepare-maven.log')"
+        $maven=(Get-Command $(if ($env:SILVERCARE_MAVEN) { $env:SILVERCARE_MAVEN } else { 'mvn.cmd' }) -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+        $mavenCmd=Join-Path $commandLogDir 'prepare-maven.cmd'
+        [IO.File]::WriteAllText($mavenCmd, ('@call "' + $maven + '" package -DskipTests' + [Environment]::NewLine), [Text.Encoding]::Default)
+        Invoke-LifecycleCommand $env:ComSpec @('/d','/c',$mavenCmd) $backendDir (Join-Path $commandLogDir 'prepare-maven.log')
+        Write-Host "安装前端依赖；日志：$(Join-Path $commandLogDir 'prepare-npm.log')"
+        $npm=(Get-Command npm.cmd -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+        $npmCli=Join-Path (Split-Path $npm) 'node_modules/npm/bin/npm-cli.js'
+        if (-not (Test-Path -LiteralPath $npmCli)) { throw '无法定位 npm-cli.js，请安装包含 npm 的 Node.js。' }
+        Invoke-LifecycleCommand $node @($npmCli,'ci') $frontendDir (Join-Path $commandLogDir 'prepare-npm.log')
+        Write-Host "准备 Python 3.12 和 AI 依赖；日志：$(Join-Path $commandLogDir 'prepare-pip.log')"
+        if (-not (Test-Path -LiteralPath $python)) {
+            $basePython=(Get-Command $(if ($env:SILVERCARE_PYTHON) { $env:SILVERCARE_PYTHON } else { 'py' }) -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+            $prefix=if ([IO.Path]::GetFileNameWithoutExtension($basePython) -eq 'py') { @('-3.12') } else { @() }
+            Invoke-LifecycleCommand $basePython ($prefix + @('-c','import sys; assert sys.version_info[:2] == (3,12), "Python 3.12 required"')) $aiDir (Join-Path $commandLogDir 'prepare-python-base.log')
+            Invoke-LifecycleCommand $basePython ($prefix + @('-m','venv',(Join-Path $aiDir '.venv'))) $aiDir (Join-Path $commandLogDir 'prepare-venv.log')
+            $python=Get-WindowsToolPath (Join-Path $aiDir '.venv/Scripts/python.exe')
+        }
+        Invoke-LifecycleCommand $python @('-c','import sys; assert sys.version_info[:2] == (3,12), "Python 3.12 required"') $aiDir (Join-Path $commandLogDir 'prepare-python.log')
+        try { Invoke-LifecycleCommand $python @('-m','pip','install','-r',(Join-Path $aiDir 'requirements.txt')) $aiDir (Join-Path $commandLogDir 'prepare-pip.log') } catch {
+            throw "AI 依赖安装失败：$($_.Exception.Message) 如日志出现 Windows 路径过长，请将项目放在更短路径（保留本项目现有数据）；脚本会优先使用可用的工具短路径，不修改系统设置。"
         }
     }
-}
-
-$localConfig = Join-Path $projectRoot "本地配置.ps1"
-if (Test-Path -LiteralPath $localConfig) {
-    . $localConfig
-}
-
-function Test-Port([int]$port) {
-    return $null -ne (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
-}
-
-function Test-TcpEndpoint([int]$port) {
-    $client = New-Object System.Net.Sockets.TcpClient
+    foreach ($artifact in @($python,$jar,$vite)) { if (-not (Test-Path -LiteralPath $artifact)) { throw '缺少构建产物或依赖；请先使用 -Prepare。' } }
+    Write-StartupStage 'python-dependencies'
+    if (-not @($liveProcesses | Where-Object name -EQ 'rag').Count) {
+        Invoke-LifecycleCommand $python @('-c','import sys, uvicorn, fastembed, pymilvus; assert sys.version_info[:2] == (3,12), "Python 3.12 required"') $aiDir (Join-Path $commandLogDir 'python-check.log') -TimeoutSeconds $TimeoutSeconds
+    } else {
+        @{utc=[DateTime]::UtcNow.ToString('o');event='skipped';reason='existing-registered-rag-process'} |
+            ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $commandLogDir 'python-check.skipped.json') -Encoding utf8
+    }
+    $state.processes=$liveProcesses; $state.ports=$ports; $state.configurationFingerprint=$fingerprint
+    Save-LifecycleState $state $config.statePath
+    $newProcesses=[Collections.Generic.List[object]]::new(); $newContainers=@()
+    $saveStateCheckpoint=${function:Save-LifecycleState}
+    $checkpointIdentity={
+        param($identity)
+        if (@($state.processes | Where-Object { $_.pid -eq $identity.pid -and $_.name -eq $identity.name }).Count -eq 0) {
+            $state.processes=@($state.processes) + @($identity)
+            $newProcesses.Add($identity)
+            & $saveStateCheckpoint $state $config.statePath
+        }
+    }.GetNewClosure()
     try {
-        $result = $client.BeginConnect("127.0.0.1", $port, $null, $null)
-        if (-not $result.AsyncWaitHandle.WaitOne(1000)) { return $false }
-        $client.EndConnect($result)
-        return $true
+        Write-StartupStage 'infrastructure'
+        Write-Host "启动并检查基础设施；日志：$(Join-Path $logDir 'compose.log')"
+        Start-LifecycleInfrastructure $state $config.statePath $docker $composeArguments (Join-Path $logDir 'compose.log')
+        $newContainers=@($state.containers | Where-Object { $_.running -and $_.id -notin $runningBefore })
+        foreach ($service in @('mysql','redis','etcd','minio')) {
+            $id=($state.containers | Where-Object service -EQ $service).id
+            if (-not $id) { throw "缺少 $service 容器。" }
+            Wait-LifecycleCondition -TimeoutSeconds $TimeoutSeconds -Description "$service 容器健康" -Condition {
+                $health=& $docker inspect --format '{{.State.Health.Status}}' $id 2>$null
+                $LASTEXITCODE -eq 0 -and $health -eq 'healthy'
+            }
+        }
+        Wait-LifecycleCondition -TimeoutSeconds $TimeoutSeconds -Description 'Milvus HTTP' -Condition { (Invoke-WebRequest -NoProxy "http://127.0.0.1:$($ports.MilvusHealthPort)/healthz" -TimeoutSec 5).StatusCode -eq 200 }
+        Write-StartupStage 'milvus-authentication'
+        Wait-LifecycleCondition -TimeoutSeconds $TimeoutSeconds -Description 'Milvus 认证连接' -Condition {
+            Invoke-LifecycleCommand $python @('-c','import os; from pymilvus import MilvusClient; c=MilvusClient(uri=os.environ["RAG_MILVUS_URI"],token=os.environ["RAG_MILVUS_TOKEN"],timeout=5); c.list_collections(timeout=5); c.close()') $aiDir (Join-Path $commandLogDir 'milvus-auth.log') -TimeoutSeconds $TimeoutSeconds
+            $true
+        }
+        Write-StartupStage 'database'
+        $mysqlId=($state.containers | Where-Object service -EQ 'mysql').id
+        & (Join-Path $projectRoot '检查数据库.ps1') -Container $mysqlId
+        if ($InitializeDemo) { & (Join-Path $projectRoot '初始化演示账号.ps1') -UseCurrentEnvironment }
+        $uploadDir=Join-Path $projectRoot ".runtime/uploads/$($config.composeProject)"
+        New-Item -ItemType Directory -Force -Path $uploadDir | Out-Null
+        Write-StartupStage 'start-applications'
+        foreach ($name in @('rag','backend','frontend')) {
+            if (@($state.processes | Where-Object name -EQ $name).Count) { continue }
+            Write-Host "启动 $name；日志目录：$logDir"
+            $env:RAG_INSTANCE_ID=$state.instanceId
+            $launch=switch ($name) {
+                rag { @{file=$python;arguments=@('-m','uvicorn','app.main:app','--app-dir',$aiDir,'--host','127.0.0.1','--port',[string]$ports.RagPort);directory=$aiDir} }
+                backend { @{file=$java;arguments=@('-jar',$jar,"--server.port=$($ports.BackendPort)",'--server.address=127.0.0.1',"--filesave.windows=$uploadDir","--filesave.linux=$uploadDir");directory=$backendDir} }
+                frontend { @{file=$node;arguments=@($vite,'--host','127.0.0.1','--port',[string]$ports.FrontendPort);directory=$frontendDir} }
+            }
+            Start-LifecycleProcess $name $launch.file $launch.arguments $launch.directory $projectRoot $logDir -OnIdentity $checkpointIdentity | Out-Null
+        }
+        Write-StartupStage 'http-readiness'
+        Write-Host '等待真实 HTTP、BGE 模型、Milvus 和前端代理健康检查。'
+        Wait-LifecycleCondition -TimeoutSeconds $TimeoutSeconds -Description 'RAG BGE + Milvus 认证诊断' -Condition {
+            $health=Invoke-RestMethod -NoProxy "http://127.0.0.1:$($ports.RagPort)/health" -TimeoutSec 5
+            $diagnostic=Invoke-RestMethod -NoProxy "http://127.0.0.1:$($ports.RagPort)/v2/diagnostics" -Headers @{'X-Internal-Token'=$env:RAG_INTERNAL_TOKEN} -TimeoutSec 5
+            $health.status -eq 'ok' -and $health.instance_id -eq $state.instanceId -and -not $health.degraded -and $diagnostic.backend -eq 'milvus-hybrid' -and $diagnostic.embedding_loaded -and $diagnostic.embedding_backend -eq 'BAAI/bge-small-zh-v1.5' -and $diagnostic.dimension -eq 512 -and $diagnostic.model.name -eq 'BAAI/bge-small-zh-v1.5' -and @($diagnostic.model.onnx_files).Count -gt 0 -and -not $diagnostic.degraded -and (Test-LifecycleAuthorization "http://127.0.0.1:$($ports.RagPort)/v2/diagnostics")
+        }
+        Wait-LifecycleCondition -TimeoutSeconds $TimeoutSeconds -Description '后端 HTTP API' -Condition {
+            $api=Invoke-RestMethod -NoProxy "http://127.0.0.1:$($ports.BackendPort)/v2/api-docs" -TimeoutSec 5
+            $api.swagger -eq '2.0' -and $null -ne $api.paths.'/ai/daily/overview' -and (Test-LifecycleAuthorization "http://127.0.0.1:$($ports.BackendPort)/ai/daily/overview")
+        }
+        Wait-LifecycleCondition -TimeoutSeconds $TimeoutSeconds -Description '前端页面及后端代理' -Condition {
+            $page=Invoke-WebRequest -NoProxy "http://127.0.0.1:$($ports.FrontendPort)/" -TimeoutSec 5
+            $api=Invoke-RestMethod -NoProxy "http://127.0.0.1:$($ports.FrontendPort)/api/v2/api-docs" -TimeoutSec 5
+            $page.StatusCode -eq 200 -and $page.Content -match '<div id="app"' -and $api.swagger -eq '2.0' -and $null -ne $api.paths.'/ai/daily/overview' -and (Test-LifecycleAuthorization "http://127.0.0.1:$($ports.FrontendPort)/api/ai/daily/overview")
+        }
+        foreach ($name in @('rag','backend','frontend')) {
+            $identity=$state.processes | Where-Object name -EQ $name | Select-Object -First 1
+            if (-not (Test-ProcessIdentity $identity)) { throw "$name 进程身份已变化。" }
+            $key=@{rag='RagPort';backend='BackendPort';frontend='FrontendPort'}[$name]
+            Assert-LifecyclePort $ports[$key] $identity
+        }
+        Write-StartupStage 'ready'
+        Write-Host "系统已通过健康检查：http://127.0.0.1:$($ports.FrontendPort)；日志：$logDir" -ForegroundColor Green
     } catch {
-        return $false
-    } finally {
-        $client.Dispose()
+        $newContainers=@($state.containers | Where-Object { $_.running -and $_.id -notin $runningBefore })
+        foreach ($identity in @($newProcesses | Sort-Object { if ($_.name -like '*-logger') { 1 } else { 0 } })) { try { Stop-OwnedProcess $identity } catch { Write-Warning '本次新建进程回滚失败，请使用停止脚本重试。' } }
+        foreach ($identity in $newContainers) { try { Stop-OwnedContainer $identity $docker } catch { Write-Warning '本次新启动容器回滚失败，请使用停止脚本重试。' } }
+        $state.processes=@($state.processes | Where-Object { Test-ProcessIdentity $_ })
+        Save-LifecycleState $state $config.statePath
+        throw "启动失败：$($_.Exception.Message) 日志：$logDir；原有运行项及数据卷已保留。"
     }
-}
-
-$dockerPath = "C:\Program Files\Docker\Docker\resources\bin\docker.exe"
-$infraCompose = Join-Path $projectRoot "docker-compose.yml"
-if (-not (Test-Path -LiteralPath $dockerPath)) {
-    throw "未找到 Docker Desktop。MySQL、Redis 和 Milvus 均由 Docker Compose 提供。"
-}
-$env:PATH = "C:\Program Files\Docker\Docker\resources\bin;" + $env:PATH
-& $dockerPath info --format "{{.ServerVersion}}" | Out-Null
-& $dockerPath compose -f $infraCompose up -d | Out-Host
-
-foreach ($port in @(3308, 6379, 19530)) {
-    for ($attempt = 0; $attempt -lt 60 -and -not (Test-TcpEndpoint $port); $attempt++) {
-        Start-Sleep -Seconds 1
-    }
-    if (-not (Test-TcpEndpoint $port)) {
-        throw "Docker 基础设施端口 $port 未就绪，请执行 docker compose ps 查看状态。"
-    }
-}
-
-if (-not $env:DB_USERNAME) { $env:DB_USERNAME = "root" }
-if (-not $env:DB_PASSWORD) { $env:DB_PASSWORD = if ($env:MYSQL_ROOT_PASSWORD) { $env:MYSQL_ROOT_PASSWORD } else { "123456" } }
-if (-not $env:REDIS_PASSWORD) { $env:REDIS_PASSWORD = "redis-dev-password" }
-
-$env:RAG_BACKEND = "milvus"
-
-# OCR 只在有 Tesseract 和语言数据时自动启用。相对路径从后端工作目录解析，可避免 Windows 中文路径导致 Tesseract 无法读取数据。
-$ocrDataDir = Join-Path $runtimeDir "ocr\tessdata"
-$ocrCommandCandidates = @(
-    "C:\Program Files\Tesseract-OCR\tesseract.exe",
-    "C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"
-)
-$ocrCommand = $ocrCommandCandidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-if ($ocrCommand -and (Test-Path -LiteralPath (Join-Path $ocrDataDir "chi_sim.traineddata"))) {
-    $env:AI_OCR_ENABLED = "true"
-    $env:AI_OCR_COMMAND = $ocrCommand
-    $env:AI_OCR_LANGUAGE = "chi_sim+eng"
-    $env:AI_OCR_DATA_DIR = "..\..\.runtime\ocr\tessdata"
-} else {
-    $env:AI_OCR_ENABLED = "false"
-    Remove-Item Env:AI_OCR_COMMAND -ErrorAction SilentlyContinue
-    Remove-Item Env:AI_OCR_LANGUAGE -ErrorAction SilentlyContinue
-    Remove-Item Env:AI_OCR_DATA_DIR -ErrorAction SilentlyContinue
-    Write-Warning "未检测到完整中文 OCR 配置；扫描 PDF/图片上传会提示安装 Tesseract 和 chi_sim 语言数据。"
-}
-
-$ragPython = Join-Path $projectRoot "源码\beadhouse-ai\.venv\Scripts\python.exe"
-if ((Test-Path -LiteralPath $ragPython) -and -not (Test-Port 8001)) {
-    $ragDir = Join-Path $projectRoot "源码\beadhouse-ai"
-    $env:NO_PROXY = "127.0.0.1,localhost"
-    $env:no_proxy = $env:NO_PROXY
-    $ragProcess = Start-Process -FilePath $ragPython `
-        -ArgumentList "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8001" `
-        -WorkingDirectory $ragDir -WindowStyle Hidden -PassThru `
-        -RedirectStandardOutput (Join-Path $logDir "rag.log") `
-        -RedirectStandardError (Join-Path $logDir "rag.err.log")
-    Set-Content -LiteralPath (Join-Path $runtimeDir "rag.pid") -Value $ragProcess.Id
-}
-
-$javaCandidates = @(
-    "C:\Program Files\Java\jdk1.8.0_201\bin\java.exe",
-    "C:\Program Files\Java\jre1.8.0_201\bin\java.exe"
-)
-$javaPath = $javaCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
-if (-not $javaPath) {
-    throw "未找到兼容的 JDK 8，请安装 JDK 8 或修改脚本中的 javaCandidates。"
-}
-
-if (-not (Test-Port 9001)) {
-    $backendDir = Join-Path $projectRoot "源码\beadhouse-backend"
-    $backendProcess = Start-Process -FilePath $javaPath `
-        -ArgumentList "-jar", "target\beadhouse-backend-0.0.1-SNAPSHOT.jar", "--server.port=9001" `
-        -WorkingDirectory $backendDir -WindowStyle Hidden -PassThru `
-        -RedirectStandardOutput (Join-Path $logDir "backend.log") `
-        -RedirectStandardError (Join-Path $logDir "backend.err.log")
-    Set-Content -LiteralPath (Join-Path $runtimeDir "backend.pid") -Value $backendProcess.Id
-}
-
-if (-not (Test-Port 8080)) {
-    $frontendDir = Join-Path $projectRoot "源码\beadhouse-frontend"
-    $frontendProcess = Start-Process -FilePath "C:\Program Files\nodejs\npm.cmd" `
-        -ArgumentList "run", "dev", "--", "--port", "8080" `
-        -WorkingDirectory $frontendDir -WindowStyle Hidden -PassThru `
-        -RedirectStandardOutput (Join-Path $logDir "frontend.log") `
-        -RedirectStandardError (Join-Path $logDir "frontend.err.log")
-    Set-Content -LiteralPath (Join-Path $runtimeDir "frontend.pid") -Value $frontendProcess.Id
-}
-
-Start-Sleep -Seconds 10
-$status = @(6379, 8001, 9001, 8080) | ForEach-Object {
-    [PSCustomObject]@{ Port = $_; Listening = Test-Port $_ }
-}
-$status | Format-Table -AutoSize
-
-if (($status | Where-Object { $_.Port -in @(6379, 8001, 9001, 8080) }).Listening -contains $false) {
-    throw "部分服务启动失败，请检查 $logDir 下的日志。"
-}
-
-Write-Host "系统已启动：http://127.0.0.1:8080" -ForegroundColor Green
+} finally { if ($lifecycleLock) { $lifecycleLock.ReleaseMutex(); $lifecycleLock.Dispose() } }

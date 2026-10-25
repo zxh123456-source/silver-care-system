@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.shanzhu.beadhouse.entity.query.PageNurseReserveByKeyQuery;
 import com.shanzhu.beadhouse.entity.vo.PageNurseReserveByKeyVo;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 
 import java.util.List;
 
@@ -17,11 +18,15 @@ import java.util.List;
  * @date: 2024-08-10
  */
 public interface NurseReserveMapper extends BaseMapper<NurseReserve> {
+    @Select("SELECT * FROM nurse_reserve WHERE id=#{id} FOR UPDATE")
+    NurseReserve selectByIdForUpdate(@Param("id") Long id);
+
     /**
      * 根据关键词获取护理预定列表
      *
      * @param keyQuery
      * @return
      */
-    List<PageNurseReserveByKeyVo> listNurseReserveByKey(@Param("keyQuery") PageNurseReserveByKeyQuery keyQuery);
+    List<PageNurseReserveByKeyVo> listNurseReserveByKey(@Param("keyQuery") PageNurseReserveByKeyQuery keyQuery,
+            @Param("scopeStaffId") Long scopeStaffId);
 }

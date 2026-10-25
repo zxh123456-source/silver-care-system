@@ -3,12 +3,17 @@ package com.shanzhu.beadhouse.service.common;
 import cn.hutool.core.bean.BeanUtil;
 import cn.hutool.core.util.ObjUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.shanzhu.beadhouse.common.constant.BedEnum;
 import com.shanzhu.beadhouse.common.constant.ExceptionEnum;
 import com.shanzhu.beadhouse.common.constant.YesNoEnum;
 import com.shanzhu.beadhouse.common.util.AssertUtil;
 import com.shanzhu.beadhouse.dao.mapper.BedMapper;
+import com.shanzhu.beadhouse.dao.mapper.ElderMapper;
+import com.shanzhu.beadhouse.dao.mapper.ReserveMapper;
+import com.shanzhu.beadhouse.common.constant.CheckEnum;
+import com.shanzhu.beadhouse.common.config.exception.BusinessRuntimeException;
 import com.shanzhu.beadhouse.entity.po.*;
 import com.shanzhu.beadhouse.entity.query.OperateBedQuery;
 import com.shanzhu.beadhouse.entity.query.PageBedByKeyQuery;
@@ -19,6 +24,9 @@ import javax.annotation.Resource;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Collection;
+import java.util.Map;
+import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 /**
@@ -26,6 +34,9 @@ import java.util.stream.Collectors;
  */
 @Component
 public class BedFunc extends ServiceImpl<BedMapper, Bed> {
+    @Resource private BedLifecycleSupport bedLifecycle;
+    @Resource private ElderMapper elderMapper;
+    @Resource private ReserveMapper reserveMapper;
     @Resource
     private BedMapper bedMapper;
 
@@ -246,13 +257,30 @@ public class BedFunc extends ServiceImpl<BedMapper, Bed> {
         List<Bed> bedList = bedMapper.selectList(new LambdaQueryWrapper<Bed>()
                 .eq(Bed::getRoomId, roomId)
                 .eq(Bed::getDelFlag, YesNoEnum.NO.getCode()));
-        bedList.forEach(bed -> {
-            // 判断该床位是否被占用
-            AssertUtil.notTrue(!Objects.equals(bed.getBedFlag(), BedEnum.IDLE.getStatus()), ExceptionEnum.NODE_BED_NOT_IDLE);
+        Map<Long, Bed> locked = lockEmptyBeds(bedList.stream().map(Bed::getId).collect(Collectors.toList()));
+        for (Long bedId : new TreeSet<>(locked.keySet())) {
+            Bed bed = locked.get(bedId);
             // 封装修改
             bed.setDelFlag(YesNoEnum.YES.getCode());
             // 修改
             bedMapper.updateById(bed);
-        });
+        }
+    }
+
+    /** Caller holds a READ_COMMITTED transaction; never take an elder lock after a bed lock. */
+    public Map<Long, Bed> lockEmptyBeds(Collection<Long> ids) {
+        Map<Long, Bed> beds = bedLifecycle.lockBeds(ids.toArray(new Long[0]));
+        for (Long id : new TreeSet<>(ids)) {
+            Bed bed = bedLifecycle.requireBed(beds, id);
+            bedLifecycle.assertBedState(bed, BedEnum.IDLE.getStatus());
+            Long occupants = elderMapper.selectCount(new LambdaQueryWrapper<Elder>()
+                    .eq(Elder::getBedId, id).in(Elder::getCheckFlag,
+                            CheckEnum.RESERVE.getStatus(), CheckEnum.ENTER.getStatus(), CheckEnum.EXIT_AUDIT.getStatus()));
+            Long reservations = reserveMapper.selectCount(new QueryWrapper<Reserve>()
+                    .eq("bed_id", id).eq("state", "ACTIVE"));
+            if (occupants > 0 || reservations > 0)
+                throw new BusinessRuntimeException(409, "床位仍被入住或有效预订引用，不能删除");
+        }
+        return beds;
     }
 }

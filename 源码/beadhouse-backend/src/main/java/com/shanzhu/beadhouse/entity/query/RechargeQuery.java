@@ -9,6 +9,8 @@ import java.math.BigDecimal;
 @Data
 @ApiModel(value = "入住老人账户充值请求实体")
 public class RechargeQuery {
+    @ApiModelProperty(value = "客户端生成的充值单号，原单重试必须复用同一UUID", required = true)
+    private String requestId;
     @ApiModelProperty(value = "老人编号", required = true, example = "1")
     private Long elderId;
     @ApiModelProperty(value = "充值金额", required = true, example = "100")

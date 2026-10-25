@@ -1,6 +1,8 @@
 // 卡片数字
 .large-card-font {
-  @apply font-semibold text-2xl;
+  font-weight: 600;
+  font-size: 1.5rem;
+  line-height: 2rem;
   color: rgb(41, 137, 255);
 }
 

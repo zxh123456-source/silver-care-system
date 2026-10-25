@@ -9,7 +9,7 @@ public interface ElderRecordService {
     /**
      * 导出excel
      */
-    Result exportExcel() throws IOException;
+    byte[] exportExcel() throws IOException;
 
     /**
      * 分页查询长者

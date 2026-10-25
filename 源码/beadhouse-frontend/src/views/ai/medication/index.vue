@@ -122,7 +122,7 @@ async function mark(task: any, status: "DONE" | "SKIPPED") {
     try {
       const result: any = await ElMessageBox.prompt("请填写未执行原因", "登记未执行", { inputValidator: (value: string) => !!value?.trim() || "原因不能为空" });
       note = result.value;
-    } catch (_) {
+    } catch {
       return;
     }
   }

@@ -29,7 +29,7 @@
                 >
                   <el-option
                     clearable
-                    :label="item.name"
+                    :label="item.label"
                     :value="item.value"
                     v-for="item in nurseTypeList"
                     :key="item.value"
@@ -57,7 +57,7 @@
                       <el-button
                         class="bg-blue"
                         type="primary"
-                        icon="Plus"
+                        :icon="Plus"
                         circle
                         style="position: absolute;width: 27.6px;height: 27.6px; top: 6.5px; left: 1.7%;z-index: 1000"
                         @click="openDrawer"
@@ -114,14 +114,12 @@
 </template>
 
 <script lang="ts" setup>
+import { handleRequestFailure } from "@/utils/requestFailure";
 import { reactive, ref } from "vue";
 import serviceListDialog from "./serviceListDialog.vue";
 import { ElMessage, FormInstance, FormRules } from "element-plus";
-import { Delete } from "@element-plus/icons-vue";
-import {
-  integerRule, numberRule,
-  stringRule
-} from "@/utils/formRules";
+import { Delete, Plus } from "@element-plus/icons-vue";
+import { numberRule, stringRule } from "@/utils/formRules";
 import { getNurseGradeById, INurseTypeList } from "@/apis/nurseGrade";
 import { arrayDeduplicationByFiled, arrayPushAllByFiled, arrayPushAllByObj, initArray } from "@/utils/commonUtil";
 
@@ -187,13 +185,13 @@ const formData = ref<any>({
 });
 
 // 添加服务
-const addService = (serviceList: any) => {
+const addService = (serviceList: any[]) => {
   // 初始化Array
   formData.value.serviceIdList = initArray(formData.value.serviceIdList);
   formData.value.nurseGradeServiceVoList = initArray(formData.value.nurseGradeServiceVoList);
 
   // 传入所有对象
-  formData.value.nurseGradeServiceVoList = arrayPushAllByObj(serviceList.value, formData.value.nurseGradeServiceVoList);
+  formData.value.nurseGradeServiceVoList = arrayPushAllByObj(serviceList, formData.value.nurseGradeServiceVoList);
 
   // 去重
   formData.value.nurseGradeServiceVoList = arrayDeduplicationByFiled(formData.value.nurseGradeServiceVoList, "id");
@@ -247,7 +245,7 @@ const handleSubmit = () => {
         });
       }
     } catch (error) {
-      console.log(error);
+      handleRequestFailure(error);
     }
   });
 };

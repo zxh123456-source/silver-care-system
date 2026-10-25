@@ -8,11 +8,19 @@ import java.util.List;
 
 public class SendEmailUtil {
     public static void sendEmail(List<String> emailList, String content) {
+        if (Constant.MAIL_HOST.isEmpty() || Constant.MAIL.isEmpty() || Constant.PASS.isEmpty()) {
+            throw new IllegalStateException("发信需要 MAIL_HOST、MAIL_ADDRESS 和 MAIL_PASSWORD");
+        }
         for (String email : emailList) {
             try {
                 HtmlEmail htmlEmail = new HtmlEmail();
                 // 配置发送邮箱的host
                 htmlEmail.setHostName(Constant.MAIL_HOST);
+                htmlEmail.setSmtpPort(587);
+                htmlEmail.setStartTLSEnabled(true);
+                htmlEmail.setStartTLSRequired(true);
+                htmlEmail.setSocketConnectionTimeout(3000);
+                htmlEmail.setSocketTimeout(5000);
                 // 配置发送邮箱和邮箱授权码
                 htmlEmail.setAuthentication(Constant.MAIL, Constant.PASS);
                 // 配置发送方

@@ -24,15 +24,20 @@ public class HealthChangeDetector {
     private double bloodGlucoseChange;
 
     public List<String> detect(List<HealthData> records) {
+        return detectCurrent(records,null);
+    }
+
+    /** Alert generation compares only metrics supplied by the current measurement. */
+    public List<String> detectCurrent(List<HealthData> records, HealthData current) {
         List<String> reminders = new ArrayList<>();
-        addRecentDouble(reminders, records, "体温", HealthData::getTemperature, temperatureChange, "℃");
-        addRecentInteger(reminders, records, "心率", HealthData::getHeartRate, heartRateChange, "次/分");
-        addRecentInteger(reminders, records, "收缩压", HealthData::getSystolicBloodPressure, bloodPressureChange, "mmHg");
-        addRecentInteger(reminders, records, "舒张压", HealthData::getDiastolicBloodPressure, bloodPressureChange, "mmHg");
-        addRecentInteger(reminders, records, "血氧", HealthData::getBloodOxygenSaturation, bloodOxygenChange, "%");
-        addRecentDouble(reminders, records, "体重", HealthData::getWeight, weightChange, "kg");
-        addRecentDouble(reminders, records, "空腹血糖", HealthData::getFastingBloodGlucose, bloodGlucoseChange, "mmol/L");
-        addRecentDouble(reminders, records, "餐后血糖", HealthData::getPostprandialBloodGlucose, bloodGlucoseChange, "mmol/L");
+        if(current==null || current.getTemperature()!=null) addRecentDouble(reminders, records, "体温", HealthData::getTemperature, temperatureChange, "℃");
+        if(current==null || current.getHeartRate()!=null) addRecentInteger(reminders, records, "心率", HealthData::getHeartRate, heartRateChange, "次/分");
+        if(current==null || current.getSystolicBloodPressure()!=null) addRecentInteger(reminders, records, "收缩压", HealthData::getSystolicBloodPressure, bloodPressureChange, "mmHg");
+        if(current==null || current.getDiastolicBloodPressure()!=null) addRecentInteger(reminders, records, "舒张压", HealthData::getDiastolicBloodPressure, bloodPressureChange, "mmHg");
+        if(current==null || current.getBloodOxygenSaturation()!=null) addRecentInteger(reminders, records, "血氧", HealthData::getBloodOxygenSaturation, bloodOxygenChange, "%");
+        if(current==null || current.getWeight()!=null) addRecentDouble(reminders, records, "体重", HealthData::getWeight, weightChange, "kg");
+        if(current==null || current.getFastingBloodGlucose()!=null) addRecentDouble(reminders, records, "空腹血糖", HealthData::getFastingBloodGlucose, bloodGlucoseChange, "mmol/L");
+        if(current==null || current.getPostprandialBloodGlucose()!=null) addRecentDouble(reminders, records, "餐后血糖", HealthData::getPostprandialBloodGlucose, bloodGlucoseChange, "mmol/L");
         return reminders;
     }
 

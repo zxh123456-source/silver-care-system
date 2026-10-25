@@ -16,8 +16,11 @@ import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -32,6 +35,8 @@ public class BedPanoramaServiceImpl implements BedPanoramaService {
     private BedFunc bedFunc;
     @Resource
     private ElderFunc elderFunc;
+    @Resource
+    private AiDataScopeService dataScopeService;
 
     @Override
     public Result listBuilding() {
@@ -62,8 +67,27 @@ public class BedPanoramaServiceImpl implements BedPanoramaService {
         List<Bed> listNotDelBed = bedFunc.listNotDelBed();
         // 根据老人姓名获取所有占用房间的老人
         List<Elder> listLiveElder = elderFunc.listLiveElder(query.getElderName());
+        Set<Long> allowedIds = dataScopeService.allowedElderIds(listLiveElder.stream()
+                .map(Elder::getId).collect(Collectors.toList()));
+        List<Elder> accessibleElders = listLiveElder.stream()
+                .filter(elder -> allowedIds.contains(elder.getId())).collect(Collectors.toList());
+        boolean searchByElderName = ObjUtil.isNotEmpty(query.getElderName());
         // 生成房间-床位树
-        List<BuildingVo.BuildingItem.FloorItem> roomTree = roomFunc.generateRoomTree(listNotDelRoomByFloorId, listNotDelBed, listLiveElder, ObjUtil.isNotEmpty(query.getElderName()));
+        List<BuildingVo.BuildingItem.FloorItem> roomTree = roomFunc.generateRoomTree(listNotDelRoomByFloorId,
+                listNotDelBed, searchByElderName ? accessibleElders : listLiveElder, searchByElderName);
+        // 库存与占用状态仍可见，老人明细只从有权限的记录填入。
+        Map<Long, Elder> accessibleByBed = new HashMap<>();
+        for (Elder elder : accessibleElders) {
+            if (elder.getBedId() != null) accessibleByBed.put(elder.getBedId(), elder);
+        }
+        for (BuildingVo.BuildingItem.FloorItem room : roomTree) {
+            for (BuildingVo.BuildingItem.FloorItem.RoomItem bed : room.getBedList()) {
+                Elder elder = accessibleByBed.get(bed.getId());
+                bed.setElderName(elder == null ? null : elder.getName());
+                bed.setSex(elder == null ? null : elder.getSex());
+                bed.setAge(elder == null ? null : elder.getAge());
+            }
+        }
         return Result.success(roomTree);
     }
 }

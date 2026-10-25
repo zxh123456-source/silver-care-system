@@ -1,4 +1,6 @@
 import { http } from "@/utils";
+import { captureResourceSession, checkedResourceSessionConfig, isResourceSessionCurrent, requireWorkbookBlob, resourceSessionConfig } from "@/utils/authResource";
+import type { ResourceSession } from "@/utils/authResource";
 
 interface IPageElderByKey {
   name: string;
@@ -29,16 +31,21 @@ export const sexList = [
 ];
 
 // 导出excel
-export function exportExcel() {
-  return http.get("/api/elderRecord/exportExcel");
+export async function exportExcel(session: ResourceSession): Promise<Blob> {
+  const response = await http.get("/api/elderRecord/exportExcel", {
+    responseType: "blob", timeout: 60000, ...resourceSessionConfig(session)
+  });
+  const blob = await requireWorkbookBlob(response);
+  if (!isResourceSessionCurrent(session)) throw new Error("登录状态已变化，请重新导出");
+  return blob;
 }
 
 // 分页查询员工
-export async function pageElderByKey(data: IPageElderByKey) {
+export function pageElderByKey(data: IPageElderByKey, session: ResourceSession = captureResourceSession()) {
   // 因为后台返回的字段与前端表单数据的prop不一样，但是组件封装是需要一样的，所以请求前增加一些这两个字段
-  Reflect.has(data, "sex") ? (data.elderSex = data.sex) : "";
-  Reflect.has(data, "name") ? (data.elderName = data.name) : "";
-  return http.get("/api/elderRecord/pageElderByKey", {
+  if (Reflect.has(data, "sex")) data.elderSex = data.sex;
+  if (Reflect.has(data, "name")) data.elderName = data.name;
+  return http.get("/api/elderRecord/pageElderByKey", { ...checkedResourceSessionConfig(session),
     params: {
       ...data
     }
@@ -46,8 +53,8 @@ export async function pageElderByKey(data: IPageElderByKey) {
 }
 
 // 根据编号获取长者信息
-export async function getElderById(data: IGetElderById) {
-  return http.get("/api/elderRecord/getElderById", {
+export function getElderById(data: IGetElderById, session: ResourceSession = captureResourceSession()) {
+  return http.get("/api/elderRecord/getElderById", { ...checkedResourceSessionConfig(session),
     params: {
       ...data
     }
@@ -55,8 +62,8 @@ export async function getElderById(data: IGetElderById) {
 }
 
 // 根据编号获取长者档案
-export async function getElderRecordById(data: IGetElderById) {
-  return http.get("/api/elderRecord/getElderRecordById", {
+export function getElderRecordById(data: IGetElderById, session: ResourceSession = captureResourceSession()) {
+  return http.get("/api/elderRecord/getElderRecordById", { ...checkedResourceSessionConfig(session),
     params: {
       ...data
     }
@@ -64,8 +71,8 @@ export async function getElderRecordById(data: IGetElderById) {
 }
 
 // 编辑长者
-export function editElder(data: IEditElder) {
-  return http.put("/api/elderRecord/editElder", data);
+export function editElder(data: IEditElder, session: ResourceSession) {
+  return http.put("/api/elderRecord/editElder", data, checkedResourceSessionConfig(session));
 }
 
 // 删除长者

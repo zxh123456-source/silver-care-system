@@ -38,8 +38,11 @@ public class EmergencyContactFunc extends ServiceImpl<EmergencyContactMapper, Em
             emergencyContact.setElderId(elderId);
             emergencyContactList.add(emergencyContact);
         });
-        // 批量插入
-        saveBatch(emergencyContactList);
+        // Use this bean's mapper/transaction-bound factory. MP 3.4.x saveBatch resolves
+        // a factory through global entity metadata, which another context can replace.
+        for (EmergencyContact contact : emergencyContactList) {
+            emergencyContactMapper.insert(contact);
+        }
     }
 
     /**

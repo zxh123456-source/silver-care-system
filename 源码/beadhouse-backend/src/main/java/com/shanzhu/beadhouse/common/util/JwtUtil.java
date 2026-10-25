@@ -9,6 +9,7 @@ import io.jsonwebtoken.security.Keys;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
+import java.util.UUID;
 
 public class JwtUtil {
     /**
@@ -20,6 +21,7 @@ public class JwtUtil {
     public static String createJwt(String id) {
         Date signTime = new Date();
         return Jwts.builder()
+                .setId(UUID.randomUUID().toString())
                 // 头部
                 .setHeaderParam("type", "JWT")
                 .setHeaderParam("alg", "HS256")
@@ -46,6 +48,8 @@ public class JwtUtil {
      */
     public static Jws<Claims> parseJwt(String jwt) {
         return Jwts.parserBuilder()
+                .requireIssuer(Constant.TOKEN_ISSURE)
+                .requireSubject(Constant.TOKEN_SUBJECT)
                 .setSigningKey(Keys.hmacShaKeyFor(Constant.TOKEN_SECRET.getBytes(StandardCharsets.UTF_8)))
                 .build()
                 .parseClaimsJws(jwt);

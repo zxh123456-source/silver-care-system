@@ -1,146 +1,193 @@
 <template>
   <el-upload
     v-model:file-list="imageList"
-    :action="requestUrl"
-    :headers="{ token: token }"
+    action="/api/file/uploadImg"
+    :http-request="uploadRequest"
+    accept="image/jpeg,image/png"
+    :disabled="uploading || sessionInvalid"
     list-type="picture-card"
     :before-upload="uploadBefore"
     :on-error="handleError"
     :on-success="handleSuccess"
-    :on-preview="handlePreview"
-    :on-remove="handleRemove"
   >
-    <el-icon>
-      <Plus />
-    </el-icon>
+    <el-icon><Plus /></el-icon>
+    <template #file="{ file }">
+      <img v-if="file.url" class="el-upload-list__item-thumbnail" :src="file.url" alt="图片预览" />
+      <span v-else class="image-placeholder">图片暂不可查看</span>
+      <span class="el-upload-list__item-actions">
+        <button type="button" aria-label="查看图片" :disabled="!file.url || sessionInvalid" @click="handlePreview(file)">
+          <el-icon><ZoomIn /></el-icon>
+        </button>
+        <button type="button" aria-label="移除图片" :disabled="uploading || sessionInvalid" @click="handleRemove(file)">
+          <el-icon><Delete /></el-icon>
+        </button>
+      </span>
+    </template>
   </el-upload>
-
-  <el-dialog v-model="dialogVisible">
-    <img w-full :src="dialogImageUrl" alt="Preview Image" />
+  <el-dialog v-model="dialogVisible" title="图片预览">
+    <img v-if="dialogImageUrl" w-full :src="dialogImageUrl" alt="图片预览" />
   </el-dialog>
 </template>
-<!--
 
-TODO 上传图片（单 / 多）使用方法
-
-// 1.导入组件
-import elderListDialog from "@/components/elderListDialog/index.vue";
-
-// 2.使用组件
-<uploadImage :uploadParams="uploadParams" @setImageData='setImageData' />
-
-// 3.定义变量和方法 single / multiple 任选一个
-ref({
-  uploadType: "single",
-  imageList: ref<UploadUserFile[]>([])
-});
-const setImageData = (url: string) => {
-  formData.value.picture = url;
-};
-
-// 4.显示单张上传的图片(多张图片时循环添加)
-// 在加载上传组件之前清空图片列表
-uploadParams.value.imageList = []
-// 添加显示上传的图片
-uploadParams.value.imageList.push({
-  uid: 0,
-  name: "0.jpeg",
-  url: formData.value.image
-});
-
--->
 <script lang="ts" setup>
 import store from "@/store";
-import { baseUrl } from "@/utils/http";
 import { ElMessage } from "element-plus";
-import { Plus } from "@element-plus/icons-vue";
-import { defineEmits, onMounted, ref, watch } from "vue";
-import type { UploadUserFile, ElUpload } from "element-plus";
-// page data
+import { Plus, ZoomIn, Delete } from "@element-plus/icons-vue";
+import { onBeforeUnmount, ref, watch } from "vue";
+import type { UploadUserFile, UploadRequestOptions } from "element-plus";
+import {
+  captureResourceSession, fetchResourceImage, isResourceSessionCurrent, uploadResourceImage
+} from "@/utils/authResource";
+import type { ResourceImage, ResourceSession } from "@/utils/authResource";
+
+const props = defineProps({ uploadParams: Object });
+const emits = defineEmits(["setImageData"]);
 const dialogImageUrl = ref("");
 const dialogVisible = ref(false);
 const imageList = ref<UploadUserFile[]>([]);
+const uploading = ref(false);
+const sessionInvalid = ref(false);
+// Persisted URLs never share the field that Element Plus uses to render Blob previews.
+const resources = new Map<number, { value: string; image?: ResourceImage }>();
+const pendingPreviews = new Set<ResourceImage>();
+let generation = 0;
+let alive = true;
+let session: ResourceSession | undefined;
+let nextUid = -1;
 
-// father component transfer to this date
-const props = defineProps({
-  uploadParams: Object
-});
-// 将即将渲染的图片添加到列表
-onMounted(() => {
-  props.uploadParams?.["imageList"].forEach((image: any) => {
-    imageList.value.push(image);
+function releaseFile(file: UploadUserFile) {
+  const resource = resources.get(file.uid!);
+  if (resource?.image) resource.image.release();
+  else if (file.url?.startsWith("blob:")) URL.revokeObjectURL(file.url);
+  resources.delete(file.uid!);
+}
+function clearImages() {
+  generation++;
+  imageList.value.forEach(releaseFile);
+  imageList.value = [];
+  resources.clear();
+  pendingPreviews.forEach(image => image.release());
+  pendingPreviews.clear();
+  dialogVisible.value = false;
+  dialogImageUrl.value = "";
+  uploading.value = false;
+}
+function checkSession() {
+  if (session && !isResourceSessionCurrent(session)) {
+    sessionInvalid.value = true;
+    clearImages();
+  }
+}
+
+watch(() => props.uploadParams?.imageList, async images => {
+  clearImages();
+  const version = generation;
+  try { session = captureResourceSession(); }
+  catch { sessionInvalid.value = true; return; }
+  sessionInvalid.value = false;
+  const captured = session;
+  const files: UploadUserFile[] = (images || []).map((image: UploadUserFile) => {
+    const file = { uid: nextUid--, name: image.name || "图片", status: "success" as const };
+    resources.set(file.uid, { value: typeof image.url === "string" ? image.url : "" });
+    return file;
   });
+  imageList.value = files;
+  await Promise.all(files.map(async file => {
+    const resource = resources.get(file.uid!)!;
+    if (!resource.value) return;
+    try {
+      const image = await fetchResourceImage(resource.value, captured);
+      if (!alive || version !== generation || !isResourceSessionCurrent(captured)
+        || resources.get(file.uid!) !== resource) { image.release(); return; }
+      resource.image = image;
+      const visible = imageList.value.find(item => item.uid === file.uid);
+      if (visible) visible.url = image.previewUrl;
+      else image.release();
+    } catch { /* Keep an unresolved legacy reference unchanged while displaying a placeholder. */ }
+  }));
+}, { immediate: true, deep: true });
+
+watch(() => [store.state.app.token, store.state.app.userPeofile?.userid], checkSession, { flush: "sync" });
+window.addEventListener("storage", checkSession);
+onBeforeUnmount(() => {
+  alive = false;
+  clearImages();
+  window.removeEventListener("storage", checkSession);
 });
 
-// http request data
-const requestUrl = baseUrl + "file/uploadImg";
-const token = store.state.app.token;
-
-// return data
-const imageUrlList = ref<any[]>([]);
-// 获取父组件方法
-const emits = defineEmits(["setImageData"]);
-// 更新数据
-const updateData = () => {
-  // 更新列表
-  imageUrlList.value = [];
-  imageList.value.forEach(image => imageUrlList.value.push(image.url));
-  // 封装图片数据
-  const data = ref<any>();
-  if (props.uploadParams?.["uploadType"] === "single") {
-    data.value = imageUrlList.value[0];
-  } else {
-    data.value = imageUrlList;
+function updateData() {
+  const values = imageList.value.map(file => resources.get(file.uid!)?.value).filter(Boolean);
+  emits("setImageData", props.uploadParams?.uploadType === "single" ? (values[0] || "") : values);
+}
+function uploadBefore(file: File) {
+  checkSession();
+  if (sessionInvalid.value || !session) return false;
+  const supported = file.type === "image/jpeg" || file.type === "image/png";
+  const sizeValid = file.size > 0 && file.size <= 2 * 1024 * 1024;
+  if (!supported) ElMessage.error("只能上传jpg/png文件！");
+  if (!sizeValid) ElMessage.error("图片不能为空且不能超过2MB！");
+  uploading.value = supported && sizeValid;
+  return uploading.value;
+}
+async function uploadRequest(options: UploadRequestOptions) {
+  const captured = session;
+  const version = generation;
+  if (!captured || sessionInvalid.value || !isResourceSessionCurrent(captured)) throw new Error("登录状态已变化");
+  const metadata = await uploadResourceImage(options.file, captured);
+  const image = await fetchResourceImage(metadata.url, captured);
+  if (!alive || version !== generation || !isResourceSessionCurrent(captured)) {
+    image.release();
+    throw new Error("登录状态或当前图片已变化，请重新打开表单");
   }
-  // 调用方法设置图片
-  emits("setImageData", data);
-};
-
-// 监听图片列表
-watch(imageList, (value, oldValue, onCleanup) => {
-  if (props.uploadParams?.["uploadType"] === "single" && imageList.value.length > 1) {
-    imageList.value.splice(0, 1);
-    updateData();
+  pendingPreviews.add(image);
+  return { metadata, image, session: captured, version };
+}
+function handleError(error: any, file: UploadUserFile) {
+  releaseFile(file);
+  imageList.value = imageList.value.filter(item => item.uid !== file.uid);
+  uploading.value = false;
+  if (alive && session && isResourceSessionCurrent(session)) ElMessage.error(error?.msg || error?.message || "上传失败，请重试");
+}
+function handleSuccess(result: { metadata: { url: string }; image: ResourceImage; session: ResourceSession; version: number }, file: UploadUserFile) {
+  pendingPreviews.delete(result.image);
+  if (!alive || result.version !== generation || !isResourceSessionCurrent(result.session)) {
+    result.image.release();
+    releaseFile(file);
+    imageList.value = imageList.value.filter(item => item.uid !== file.uid);
+    return;
   }
-});
-
-// 上传之前
-const uploadBefore = (file: any) => {
-  const isJPG = file.type === "image/jpeg" || file.type === "image/png";
-  const isLt2M = file.size / 1024 / 1024 < 2;
-
-  if (!isJPG) {
-    ElMessage.error("只能上传jpg/png文件！");
+  releaseFile(file);
+  if (props.uploadParams?.uploadType === "single") {
+    imageList.value.filter(item => item.uid !== file.uid).forEach(releaseFile);
+    imageList.value = [file];
   }
-  if (!isLt2M) {
-    ElMessage.error("文件大小不能超过2MB！");
-  }
-
-  return isJPG && isLt2M;
-};
-
-// 上传失败
-const handleError = (response: any) => {
-  ElMessage.error(response.data.msg);
-};
-
-// 上传成功
-const handleSuccess = (response: any, uploadFile: any) => {
-  uploadFile.url = response.data.url;
+  resources.set(file.uid!, { value: result.metadata.url, image: result.image });
+  file.url = result.image.previewUrl;
+  file.status = "success";
+  uploading.value = false;
+  dialogVisible.value = false;
+  dialogImageUrl.value = "";
   updateData();
-};
-
-// 删除图片
-const handleRemove = async (uploadFile: any) => {
-  imageList.value.filter((image) => image.uid !== uploadFile.uid);
+}
+function handleRemove(file: UploadUserFile) {
+  checkSession();
+  if (uploading.value || sessionInvalid.value) return;
+  releaseFile(file);
+  imageList.value = imageList.value.filter(item => item.uid !== file.uid);
+  dialogVisible.value = false;
+  dialogImageUrl.value = "";
   updateData();
-
-  // TODO 根据【imageId : uploadFile.uid】调用删除数据库图片的接口
-};
-
-// 查看大图
-const handlePreview = (uploadFile: any) => {
-  dialogImageUrl.value = uploadFile.url!;
+}
+function handlePreview(file: UploadUserFile) {
+  checkSession();
+  if (sessionInvalid.value || !file.url?.startsWith("blob:")) return;
+  dialogImageUrl.value = file.url;
   dialogVisible.value = true;
-};
+}
 </script>
+
+<style scoped>
+.image-placeholder { display: grid; place-items: center; height: 100%; color: #606266; }
+.el-upload-list__item-actions button { margin: 0 6px; }
+.el-upload-list__item-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
+</style>

@@ -1,6 +1,8 @@
 package com.shanzhu.beadhouse.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.shanzhu.beadhouse.common.config.exception.BusinessRuntimeException;
 import com.shanzhu.beadhouse.common.constant.BedEnum;
 import com.shanzhu.beadhouse.common.constant.ExceptionEnum;
 import com.shanzhu.beadhouse.common.constant.MarkEnum;
@@ -20,13 +22,17 @@ import com.shanzhu.beadhouse.service.BuildService;
 import com.shanzhu.beadhouse.service.common.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Isolation;
 
 import javax.annotation.Resource;
 import java.util.List;
 import java.util.Objects;
+import java.util.Collections;
+import java.util.stream.Collectors;
 
 @Service
 public class BuildServiceImpl implements BuildService {
+    @Resource private BedLifecycleSupport bedLifecycle;
     @Resource
     private BuildingMapper buildingMapper;
     @Resource
@@ -106,7 +112,9 @@ public class BuildServiceImpl implements BuildService {
     }
 
     @Override
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result editBuilding(OperateBuildingQuery query) {
+        lockBuilding(query.getId());
         // 判断楼栋是否已存在
         Building buildingByName = buildingFunc.getBuildingByName(query.getName());
         boolean checkName = buildingByName != null && !Objects.equals(buildingByName.getId(), query.getId());
@@ -119,7 +127,10 @@ public class BuildServiceImpl implements BuildService {
     }
 
     @Override
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result addFloor(OperateFloorQuery query) {
+        Building parent = lockBuilding(query.getBuildingId());
+        query.setFloorLimit(parent.getFloorNum());
         // 判断楼层在该楼栋是否已存在
         AssertUtil.isNull(floorFunc.getFloorByName(query), ExceptionEnum.FLOOR_REPEAT);
         // 判断楼层是否已达到总数限制
@@ -143,7 +154,10 @@ public class BuildServiceImpl implements BuildService {
     }
 
     @Override
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result editFloor(OperateFloorQuery query) {
+        Floor stored = lockFloorPath(query.getId());
+        requireSameParent(stored.getBuildingId(), query.getBuildingId());
         // 判断楼层在该楼栋是否已存在
         Floor floorByName = floorFunc.getFloorByName(query);
         boolean checkName = floorByName != null && !Objects.equals(floorByName.getId(), query.getId());
@@ -161,7 +175,10 @@ public class BuildServiceImpl implements BuildService {
     }
 
     @Override
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result addRoom(OperateRoomQuery query) {
+        Floor parent = lockFloorPath(query.getFloorId());
+        query.setRoomLimit(parent.getRoomNum());
         // 判断房间在该楼层是否已存在
         AssertUtil.isNull(roomFunc.getRoomByName(query), ExceptionEnum.ROOM_REPEAT);
         // 判断楼层是否已达到总数限制
@@ -185,7 +202,10 @@ public class BuildServiceImpl implements BuildService {
     }
 
     @Override
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result editRoom(OperateRoomQuery query) {
+        Room stored = lockRoomPath(query.getId());
+        requireSameParent(stored.getFloorId(), query.getFloorId());
         // 判断楼层在该楼栋是否已存在
         Room roomByName = roomFunc.getRoomByName(query);
         boolean checkName = roomByName != null && !Objects.equals(roomByName.getId(), query.getId());
@@ -198,10 +218,38 @@ public class BuildServiceImpl implements BuildService {
     }
 
     @Override
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result deleteNode(DeleteNodeQuery query) {
         Long id = query.getId();
         String mark = query.getMark();
+        // Every structural writer locks the same ancestor before discovering descendants.
+        // Clinical flows only lock elder -> bed and never acquire these parent locks.
+        List<Room> rooms;
+        if (Objects.equals(mark, MarkEnum.BUILDING.getMark())) {
+            lockBuilding(id);
+            List<Long> floors = floorMapper.selectList(new LambdaQueryWrapper<Floor>()
+                    .eq(Floor::getBuildingId, id).eq(Floor::getDelFlag, YesNoEnum.NO.getCode())
+                    .orderByAsc(Floor::getId).last("FOR UPDATE")).stream().map(Floor::getId).collect(Collectors.toList());
+            rooms = floors.isEmpty() ? Collections.emptyList() : roomMapper.selectList(new LambdaQueryWrapper<Room>()
+                    .in(Room::getFloorId, floors).eq(Room::getDelFlag, YesNoEnum.NO.getCode())
+                    .orderByAsc(Room::getId).last("FOR UPDATE"));
+        } else if (Objects.equals(mark, MarkEnum.FLOOR.getMark())) {
+            lockFloorPath(id);
+            rooms = roomMapper.selectList(new LambdaQueryWrapper<Room>()
+                    .eq(Room::getFloorId, id).eq(Room::getDelFlag, YesNoEnum.NO.getCode())
+                    .orderByAsc(Room::getId).last("FOR UPDATE"));
+        } else if (Objects.equals(mark, MarkEnum.ROOM.getMark())) {
+            rooms = Collections.singletonList(lockRoomPath(id));
+        } else {
+            throw new BusinessRuntimeException(ExceptionEnum.NODE_MARK_NOT_EXIST);
+        }
+        List<Long> roomIds = rooms.stream().map(Room::getId).collect(Collectors.toList());
+        if (!roomIds.isEmpty()) {
+            List<Long> beds = bedMapper.selectList(new LambdaQueryWrapper<Bed>()
+                    .in(Bed::getRoomId, roomIds).eq(Bed::getDelFlag, YesNoEnum.NO.getCode()))
+                    .stream().map(Bed::getId).collect(Collectors.toList());
+            bedFunc.lockEmptyBeds(beds);
+        }
         // 删除楼栋节点
         if (Objects.equals(mark, MarkEnum.BUILDING.getMark())) {
             buildingFunc.deleteBuildingNode(id);
@@ -219,7 +267,10 @@ public class BuildServiceImpl implements BuildService {
     }
 
     @Override
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result addBed(OperateBedQuery query) {
+        Room parent = lockRoomPath(query.getRoomId());
+        query.setBedLimit(parent.getBedNum());
         // 判断楼层在该楼栋是否已存在
         AssertUtil.isNull(bedFunc.getBedByName(query), ExceptionEnum.BED_REPEAT);
         // 判断楼层是否已达到总数限制
@@ -244,7 +295,14 @@ public class BuildServiceImpl implements BuildService {
     }
 
     @Override
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result editBed(OperateBedQuery query) {
+        Bed snapshot = bedMapper.selectById(query.getId());
+        if (snapshot == null) throw new BusinessRuntimeException(409, "床位不存在或已删除");
+        lockRoomPath(snapshot.getRoomId());
+        Bed stored = bedLifecycle.requireBed(bedLifecycle.lockBeds(query.getId()), query.getId());
+        requireSameParent(snapshot.getRoomId(), stored.getRoomId());
+        requireSameParent(stored.getRoomId(), query.getRoomId());
         // 判断楼层在该楼栋是否已存在
         Bed bedByName = bedFunc.getBedByName(query);
         boolean checkName = bedByName != null && !Objects.equals(bedByName.getId(), query.getId());
@@ -257,10 +315,9 @@ public class BuildServiceImpl implements BuildService {
     }
 
     @Override
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result deleteBed(Long bedId) {
-        // 判断该床位是否被占用
-        boolean checkBedFlag = !Objects.equals(bedMapper.selectById(bedId).getBedFlag(), BedEnum.IDLE.getStatus());
-        AssertUtil.notTrue(checkBedFlag, ExceptionEnum.BED_NOT_IDLE);
+        bedFunc.lockEmptyBeds(Collections.singletonList(bedId));
         // 封装修改
         Bed bed = new Bed();
         bed.setId(bedId);
@@ -268,5 +325,43 @@ public class BuildServiceImpl implements BuildService {
         // 修改
         bedMapper.updateById(bed);
         return Result.success();
+    }
+
+    private Building lockBuilding(Long id) {
+        if (id == null) throw new BusinessRuntimeException(409, "楼栋不存在或已删除");
+        Building building = buildingMapper.selectOne(new LambdaQueryWrapper<Building>()
+                .eq(Building::getId, id).last("FOR UPDATE"));
+        if (building == null || !YesNoEnum.NO.getCode().equals(building.getDelFlag()))
+            throw new BusinessRuntimeException(409, "楼栋不存在或已删除");
+        return building;
+    }
+
+    private Floor lockFloorPath(Long id) {
+        Floor snapshot = id == null ? null : floorMapper.selectById(id);
+        if (snapshot == null) throw new BusinessRuntimeException(409, "楼层不存在或已删除");
+        lockBuilding(snapshot.getBuildingId());
+        Floor floor = floorMapper.selectOne(new LambdaQueryWrapper<Floor>()
+                .eq(Floor::getId, id).last("FOR UPDATE"));
+        if (floor == null || !YesNoEnum.NO.getCode().equals(floor.getDelFlag()))
+            throw new BusinessRuntimeException(409, "楼层不存在或已删除");
+        requireSameParent(snapshot.getBuildingId(), floor.getBuildingId());
+        return floor;
+    }
+
+    private Room lockRoomPath(Long id) {
+        Room snapshot = id == null ? null : roomMapper.selectById(id);
+        if (snapshot == null) throw new BusinessRuntimeException(409, "房间不存在或已删除");
+        lockFloorPath(snapshot.getFloorId());
+        Room room = roomMapper.selectOne(new LambdaQueryWrapper<Room>()
+                .eq(Room::getId, id).last("FOR UPDATE"));
+        if (room == null || !YesNoEnum.NO.getCode().equals(room.getDelFlag()))
+            throw new BusinessRuntimeException(409, "房间不存在或已删除");
+        requireSameParent(snapshot.getFloorId(), room.getFloorId());
+        return room;
+    }
+
+    private void requireSameParent(Long stored, Long requested) {
+        if (!Objects.equals(stored, requested))
+            throw new BusinessRuntimeException(409, "不能修改楼层、房间或床位的上级节点");
     }
 }

@@ -85,13 +85,13 @@ mybatis-plus:
   type-aliases-package: com.shanzhu.beadhouse.entity.po
   configuration:
     # 打印sql操作记录g
-    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+    log-impl: ${MYBATIS_LOG_IMPL:org.apache.ibatis.logging.nologging.NoLoggingImpl}
 # 文件通用路径配置
 filesave:
   windows: D:\exam
   macos: /Users/jiawang/temp/upload
   linux: /Test/project/file/upload/
-  upload-head: http://127.0.0.1:9001
+  upload-head: ${FILE_UPLOAD_HEAD:/api}
   local-head: http://127.0.0.1:9001
 ignore:
   # 白名单，不需要登录即可访问
@@ -99,8 +99,6 @@ ignore:
     - /account/login
     - /account/sendCode
     - /account/forget
-    - /upload/**
-    - /download/**
     - /doc.html
     - /webjars/**
     - /favicon.ico
@@ -110,6 +108,10 @@ ignore:
   tokenUrl:
     - /account/edit
     - /account/logout
+
+security:
+  password-reset:
+    email-enabled: ${PASSWORD_RESET_EMAIL_ENABLED:false}
 
 ai:
   provider:
@@ -129,11 +131,14 @@ ai:
   rag:
     enabled: ${AI_RAG_ENABLED:true}
     url: ${AI_RAG_URL:http://127.0.0.1:8001}
-    internal-token: ${AI_RAG_INTERNAL_TOKEN:local-dev-token}
+    internal-token: ${AI_RAG_INTERNAL_TOKEN:}
     connect-timeout-ms: ${AI_RAG_CONNECT_TIMEOUT_MS:500}
     read-timeout-ms: ${AI_RAG_READ_TIMEOUT_MS:1500}
     top-k: ${AI_RAG_TOP_K:5}
     retry-interval-ms: ${AI_RAG_RETRY_INTERVAL_MS:30000}
+    lease-seconds: ${AI_RAG_LEASE_SECONDS:30}
+    retry:
+      enabled: ${AI_RAG_RETRY_ENABLED:true}
   ocr:
     enabled: ${AI_OCR_ENABLED:true}
     command: ${AI_OCR_COMMAND:tesseract}

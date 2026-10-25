@@ -23,6 +23,7 @@ import java.util.stream.Collectors;
  */
 @Component
 public class CommonFunc {
+    @Resource private ElderPageService elderPages;
     @Resource
     private ElderFunc elderFunc;
     @Resource
@@ -37,6 +38,10 @@ public class CommonFunc {
     private BedFunc bedFunc;
     @Resource
     private PageUtil pageUtil;
+    @Resource
+    private AiDataScopeService dataScopeService;
+    @Resource
+    private com.shanzhu.beadhouse.dao.mapper.ElderMapper elderMapper;
 
     /**
      * 封装搜索老人列表
@@ -47,7 +52,8 @@ public class CommonFunc {
      */
     public List<PageSearchElderByKeyVo> listPageElderByKey(PageSearchElderByKeyQuery query, List<String> checkFlagList) {
         // 根据姓名和联系电话获取不同入住状态的老人列表
-        List<Elder> listElderByKey = elderFunc.listElderByKey(query.getName(), query.getPhone(), checkFlagList);
+        List<Elder> listElderByKey = elderMapper.listScopedElders(query.getName(), query.getPhone(), checkFlagList,
+                dataScopeService.queryStaffId());
         // 实体转换
         return BeanUtil.copyToList(listElderByKey, PageSearchElderByKeyVo.class);
 
@@ -61,11 +67,13 @@ public class CommonFunc {
      * @return
      */
     public Result pageSearchElderByKeyResult(PageSearchElderByKeyQuery query, List<String> checkFlagList) {
-        // 实体转换
-        List<PageSearchElderByKeyVo> pageSearchElderByKeyVoList = listPageElderByKey(query, checkFlagList);
-        // 封装返回数据
-        PageResult<PageSearchElderByKeyVo> pageResult = pageUtil.packPageResultData(pageSearchElderByKeyVoList, query.getPageNum(), query.getPageSize());
-        return Result.success(pageResult);
+        return pageSearchElderByKeyResult(query,checkFlagList,false,false);
+    }
+
+    public Result pageSearchElderByKeyResult(PageSearchElderByKeyQuery query,List<String> checkFlagList,
+            boolean excludeOutward,boolean excludePendingRetreat) {
+        return Result.success(elderPages.selector(query,checkFlagList,dataScopeService.queryStaffId(),
+                excludeOutward,excludePendingRetreat));
     }
 
     /**

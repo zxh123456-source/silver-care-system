@@ -2,3 +2,15 @@ spring:
   # 环境 dev|test|prod
   profiles:
     active: dev
+
+# Shanghai calendar based background compensation; unrelated Quartz jobs remain unchanged.
+ai:
+  alert:
+    scan:
+      enabled: ${AI_ALERT_SCAN_ENABLED:true}
+      batch-size: ${AI_ALERT_SCAN_BATCH_SIZE:100}
+      max-batches: ${AI_ALERT_SCAN_MAX_BATCHES:4}
+      lease-seconds: ${AI_ALERT_SCAN_LEASE_SECONDS:120}
+      rescan-seconds: ${AI_ALERT_SCAN_RESCAN_SECONDS:900}
+      initial-delay-ms: ${AI_ALERT_SCAN_INITIAL_DELAY_MS:10000}
+      delay-ms: ${AI_ALERT_SCAN_DELAY_MS:60000}

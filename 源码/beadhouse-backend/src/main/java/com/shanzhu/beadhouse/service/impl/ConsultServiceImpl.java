@@ -2,6 +2,10 @@ package com.shanzhu.beadhouse.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
 import com.shanzhu.beadhouse.common.constant.CheckEnum;
+import com.shanzhu.beadhouse.common.config.exception.BusinessRuntimeException;
+import com.shanzhu.beadhouse.service.common.AiDataScopeService;
+import com.shanzhu.beadhouse.service.common.BedLifecycleSupport;
+import java.util.Objects;
 import com.shanzhu.beadhouse.common.constant.ExceptionEnum;
 import com.shanzhu.beadhouse.common.util.AssertUtil;
 import com.shanzhu.beadhouse.common.util.DateUtilWen;
@@ -25,6 +29,7 @@ import com.shanzhu.beadhouse.service.common.SourceFunc;
 import com.shanzhu.beadhouse.service.common.StaffFunc;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Isolation;
 
 import javax.annotation.Resource;
 import java.util.Date;
@@ -32,6 +37,8 @@ import java.util.List;
 
 @Service
 public class ConsultServiceImpl implements ConsultService {
+    @Resource private BedLifecycleSupport bedLifecycle;
+    @Resource private AiDataScopeService dataScopeService;
     @Resource
     private ConsultMapper consultMapper;
     @Resource
@@ -63,7 +70,7 @@ public class ConsultServiceImpl implements ConsultService {
         Date startTime = DateUtilWen.getDayStartTime(DateUtilWen.dateStrToDate(query.getStartTime()));
         Date endTime = DateUtilWen.getDayEndTime(DateUtilWen.dateStrToDate(query.getEndTime()));
         // 获取咨询列表
-        List<PageConsultByKeyVo> consultByKeyVoList = consultMapper.listConsultByKey(query, startTime, endTime);
+        List<PageConsultByKeyVo> consultByKeyVoList = consultMapper.listConsultByKey(query, startTime, endTime, dataScopeService.queryStaffId());
         // 封装返回数据
         PageResult<PageConsultByKeyVo> pageResult = pageUtil.packPageResultData(consultByKeyVoList, query.getPageNum(), query.getPageSize());
         return Result.success(pageResult);
@@ -88,6 +95,7 @@ public class ConsultServiceImpl implements ConsultService {
 
     @Override
     public Result getConsultByConsultIdAndElderId(GetConsultByConsultIdAndElderIdQuery query) {
+        requireConsultAccess(query.getConsultId(), query.getElderId());
         // 根据咨询人编号和老人编号查询咨询信息
         List<GetConsultByConsultIdAndElderIdVo> getConsultByConsultIdAndElderId = consultMapper.getConsultByConsultIdAndElderId(query);
         // 判断是否为空
@@ -96,8 +104,12 @@ public class ConsultServiceImpl implements ConsultService {
     }
 
     @Override
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result editConsult(OperateConsultQuery query) {
+        requireConsultAccess(query.getConsultId(), query.getElderId());
+        Elder stored = bedLifecycle.lockElder(query.getElderId());
+        requireConsultAccess(query.getConsultId(), stored.getId());
+        bedLifecycle.assertState(stored, CheckEnum.CONSULT.getStatus());
         // 验证老人
         elderFunc.checkElder(query.getElderId(), query.getIdNum());
         // 初始化老人
@@ -114,9 +126,12 @@ public class ConsultServiceImpl implements ConsultService {
     }
 
     @Override
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result deleteConsult(Long elderId) {
-        // 验证老人
-        Elder elder = elderFunc.checkElder(elderId, null);
+        dataScopeService.assertElderAccess(elderId);
+        Elder elder = bedLifecycle.lockElder(elderId);
+        dataScopeService.assertElderAccess(elderId);
+        bedLifecycle.assertState(elder, CheckEnum.CONSULT.getStatus());
         // 封装修改
         elder.setCheckFlag(CheckEnum.FAILURE.getStatus());
         // 修改
@@ -125,13 +140,24 @@ public class ConsultServiceImpl implements ConsultService {
     }
 
     @Override
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result intentionConsult(Long elderId) {
-        // 验证老人
-        Elder elder = elderFunc.checkElder(elderId, null);
+        dataScopeService.assertElderAccess(elderId);
+        Elder elder = bedLifecycle.lockElder(elderId);
+        dataScopeService.assertElderAccess(elderId);
+        bedLifecycle.assertState(elder, CheckEnum.CONSULT.getStatus());
         // 封装修改
         elder.setCheckFlag(CheckEnum.INTENTION.getStatus());
         // 修改
         elderMapper.updateById(elder);
         return Result.success();
+    }
+
+    private void requireConsultAccess(Long id, Long elderId) {
+        AssertUtil.notNull(id, ExceptionEnum.DATA_NOT_EXIST);
+        Consult stored = consultMapper.selectById(id);
+        AssertUtil.notNull(stored, ExceptionEnum.DATA_NOT_EXIST);
+        dataScopeService.assertElderAccess(stored.getElderId());
+        if (!Objects.equals(stored.getElderId(), elderId)) throw new BusinessRuntimeException(403, "咨询记录与老人不匹配");
     }
 }

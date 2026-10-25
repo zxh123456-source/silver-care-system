@@ -51,8 +51,6 @@ public class SecurityConfig extends WebSecurityConfigurerAdapter {
                 .authorizeRequests()
                 // 放行登录接口后就不需要登录安全框架自带的登录页面
                 // 允许匿名访问的接口（建议是登录和忘记密码接口）
-                .antMatchers(commonUtil.getIgnoreUrlArray()).anonymous()
-                // 允许全部放通的接口
                 .antMatchers(commonUtil.getIgnoreUrlArray()).permitAll()
                 // 需要鉴权认证的接口
                 .anyRequest().authenticated();

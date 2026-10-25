@@ -1,5 +1,6 @@
 import store from "@/store";
 import baseAxios, { AxiosRequestConfig, AxiosResponse } from "axios";
+import type { AxiosInstance } from "axios";
 import { ElMessage } from "element-plus";
 
 export const baseUrl = "http://127.0.0.1:9001/";
@@ -10,26 +11,122 @@ const axios = baseAxios.create({
   headers: {}
 });
 
+const publicAuthPaths = new Set(["/api/account/login", "/api/account/sendCode", "/api/account/forget"]);
+let redirectingToLogin = false;
+function requestPath(config?: AxiosRequestConfig): string {
+  try { return new URL(axios.getUri(config), window.location.origin).pathname; }
+  catch { return ""; }
+}
+export function isSameOriginApi(config?: AxiosRequestConfig): boolean {
+  try {
+    const url = new URL(axios.getUri(config), window.location.origin);
+    return url.origin === window.location.origin && /^https?:$/.test(url.protocol) && url.pathname.startsWith("/api/");
+  } catch { return false; }
+}
+function storedToken(): string | undefined {
+  try {
+    const token = JSON.parse(localStorage.getItem("stateData") || "null")?.app?.token;
+    return typeof token === "string" && token ? token : undefined;
+  } catch { return undefined; }
+}
+function handleAuthFailure(data: any, status: number, config?: AxiosRequestConfig): boolean {
+  if (!isSameOriginApi(config)) return false;
+  const expired = status === 401 || data?.code === 401 || (data?.code === 500 && data?.msg === "令牌无效");
+  const forbidden = status === 403 || data?.code === 403;
+  if (!expired && !forbidden) return false;
+  if (expired && publicAuthPaths.has(requestPath(config))) {
+    ElMessage.error(data?.msg || "账号或密码错误");
+    return true;
+  }
+  const current = storedToken();
+  const sent = (config?.headers as any)?.token;
+  // A late failure from an older request must not log out a newly established session.
+  if (current && sent !== current) return true;
+  if (expired) {
+    if (!redirectingToLogin) {
+      redirectingToLogin = true;
+      store.dispatch("app/logout");
+      ElMessage.error("登录已失效，请重新登录");
+    }
+  } else {
+    ElMessage.error(data?.msg || "权限不足");
+  }
+  return true;
+}
+
 // 请求拦截器
 axios.interceptors.request.use((config: any) => {
-  const token = JSON.parse(localStorage.getItem("stateData")!)?.app?.token;
-  config.headers.token = token;
+  const token = storedToken();
+  if (token && isSameOriginApi(config) && !publicAuthPaths.has(requestPath(config))) config.headers.set("token", token);
+  else config.headers.delete("token");
   return config;
 });
 
+async function responseData(data: any, status: number): Promise<any> {
+  if (!(data instanceof Blob) || data.size > 1024 * 1024) return data;
+  const jsonType = data.type.toLowerCase().includes("json");
+  const prefix = (await data.slice(0, 64).text()).trimStart();
+  if (!jsonType && status < 400 && !prefix.startsWith("{") && !prefix.startsWith("[")) return data;
+  try { return JSON.parse(await data.text()); }
+  catch { return data; }
+}
+
 // 响应拦截器
 axios.interceptors.response.use(
-  (res: AxiosResponse) => {
-    if (res.data.code === 500 && res.data.msg === "令牌无效") {
-      store.dispatch("app/logout");
-      ElMessage.error({ message: "登录过期，请重新登录" });
+  async (res: AxiosResponse) => {
+    const data = await responseData(res.data, res.status);
+    if (handleAuthFailure(data, res.status, res.config)) return Promise.reject(data);
+    if (isSameOriginApi(res.config) && requestPath(res.config) === "/api/account/login" && data?.code === 200) redirectingToLogin = false;
+    if (data?.err === 1) {
+      return Promise.reject(data);
     }
-    if (res.data.err === 1) {
-      return Promise.reject(res.data);
-    }
-    return res.data;
+    return data;
   },
-  err => Promise.reject(err) // 响应出问题
+  async err => {
+    if (baseAxios.isCancel(err)) return Promise.reject(err);
+    const data = await responseData(err.response?.data, err.response?.status || 0);
+    if (!handleAuthFailure(data, err.response?.status, err.config)) {
+      ElMessage.error(data?.msg || "请求失败，请稍后重试");
+    }
+    return Promise.reject(data || err);
+  }
 );
 
-export default axios;
+interface HttpResponse<T = any> {
+  code: number;
+  data: T;
+  msg?: string;
+}
+
+// Shared session configs can carry a serializer for any query record. Do not
+// narrow that record from params alone when the config is spread into a request.
+type QueryParams = Record<string, unknown>;
+type ReadRequest = <T = any, R = HttpResponse<T>, D = unknown, P = QueryParams>(
+  url: string, config?: AxiosRequestConfig<D, NoInfer<P>>
+) => Promise<R>;
+type WriteRequest = <T = any, R = HttpResponse<T>, D = unknown, P = QueryParams>(
+  url: string, data?: D, config?: AxiosRequestConfig<D, NoInfer<P>>
+) => Promise<R>;
+type ConfigRequest = <T = any, R = HttpResponse<T>, D = unknown, P = QueryParams>(
+  config: AxiosRequestConfig<D, NoInfer<P>>
+) => Promise<R>;
+type HttpClient = Omit<AxiosInstance, "request" | "get" | "delete" | "head" | "options"
+  | "post" | "put" | "patch" | "postForm" | "putForm" | "patchForm" | "query"> & {
+  <T = any, R = HttpResponse<T>, D = unknown, P = QueryParams>(config: AxiosRequestConfig<D, NoInfer<P>>): Promise<R>;
+  <T = any, R = HttpResponse<T>, D = unknown, P = QueryParams>(url: string, config?: AxiosRequestConfig<D, NoInfer<P>>): Promise<R>;
+  request: ConfigRequest;
+  get: ReadRequest;
+  delete: ReadRequest;
+  head: ReadRequest;
+  options: ReadRequest;
+  post: WriteRequest;
+  put: WriteRequest;
+  patch: WriteRequest;
+  postForm: WriteRequest;
+  putForm: WriteRequest;
+  patchForm: WriteRequest;
+  query: WriteRequest;
+};
+
+// The response interceptor above returns the body, rather than AxiosResponse.
+export default axios as HttpClient;

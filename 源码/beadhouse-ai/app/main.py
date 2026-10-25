@@ -1,15 +1,19 @@
 from fastapi import Depends, FastAPI, Header, HTTPException
+import secrets
+import os
+import uuid
 
 from .models import (
     SearchHit,
+    SyncDocumentRequest,
+    SyncResponse,
     DeleteDocumentRequest,
-    DeleteResponse,
     IndexDocumentRequest,
-    IndexResponse,
     QueryRequest,
     QueryResponse,
 )
 from .backend import BackendUnavailable, RetrievalBackend
+from .protocol import VersionConflict
 from .settings import get_settings
 from .store import JsonDocumentStore
 from .security import prompt_injection_detected
@@ -17,41 +21,75 @@ from .security import prompt_injection_detected
 settings = get_settings()
 store = JsonDocumentStore(settings.data_file)
 backend = RetrievalBackend(settings, store)
-app = FastAPI(title="银龄智慧康护 RAG 服务", version="1.0.0")
+app = FastAPI(title="银龄智慧康护 RAG 服务", version="2.0.0")
+_instance_process = os.getpid()
+_instance_id = os.environ.get("RAG_INSTANCE_ID") or uuid.uuid4().hex
+
+
+def instance_id() -> str:
+    global _instance_process, _instance_id
+    if os.getpid() != _instance_process:
+        _instance_process = os.getpid()
+        _instance_id = os.environ.get("RAG_INSTANCE_ID") or uuid.uuid4().hex
+    return _instance_id
 
 
 def verify_token(x_internal_token: str | None = Header(default=None)) -> None:
-    if x_internal_token != settings.internal_token:
+    if x_internal_token is None or not secrets.compare_digest(x_internal_token.encode(), settings.internal_token.encode()):
         raise HTTPException(status_code=401, detail="invalid internal token")
 
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "backend": backend.name, "embedding_backend": backend.embedder.name,
-            "degraded": backend.embedder.degraded, "chunks": len(store.all_chunks())}
+    snapshot = store.snapshot()
+    pending = backend.settings.backend.lower() == "milvus" and backend._pending(snapshot)
+    return {"status": "ok", "instance_id": instance_id(), "backend": backend.name, "embedding_backend": backend.embedder.name,
+            "degraded": backend.embedder.degraded or pending or (backend.settings.backend.lower() == "milvus" and backend._milvus is None),
+            "fallback_code": "INDEX_SYNC_PENDING" if pending else backend.embedder.fallback_code,
+            "milvus_collection": backend.collection_name if backend.settings.backend.lower() == "milvus" else None,
+            "chunks": len(store.chunks_from(snapshot))}
 
 
-@app.post("/v1/documents/index", response_model=IndexResponse, dependencies=[Depends(verify_token)])
-def index_document(request: IndexDocumentRequest) -> IndexResponse:
+@app.get("/v2/diagnostics", dependencies=[Depends(verify_token)])
+def diagnostics() -> dict:
+    evidence = backend.embedder.diagnostics()
+    current = health()
+    # Read the connected handle only; diagnostics must not reconnect or issue Milvus network calls.
+    active_index = backend._milvus
+    evidence.update({
+        "instance_id": current["instance_id"],
+        "backend": current["backend"],
+        "requested_backend": backend.settings.backend,
+        "degraded": current["degraded"],
+        "fallback_code": current["fallback_code"],
+        "milvus_collection": getattr(active_index, "collection", None),
+        "milvus_collection_generation": getattr(active_index, "collection_id", None),
+    })
+    return evidence
+
+
+@app.post("/v1/documents/index", dependencies=[Depends(verify_token)])
+def index_document(request: IndexDocumentRequest):
+    raise HTTPException(status_code=409, detail={"code": "VERSION_REQUIRED"})
+
+
+@app.post("/v1/documents/delete", dependencies=[Depends(verify_token)])
+def delete_document(request: DeleteDocumentRequest):
+    raise HTTPException(status_code=409, detail={"code": "VERSION_REQUIRED"})
+
+
+@app.post("/v2/documents/sync", response_model=SyncResponse, dependencies=[Depends(verify_token)])
+def sync_document(request: SyncDocumentRequest):
     try:
-        indexed = backend.upsert_document(
-            request.document_key,
-            request.title,
-            request.source,
-            [chunk.model_dump() for chunk in request.chunks],
-        )
+        count = backend.sync_document(request.document_key, request.version, request.action,
+                                      request.payload_hash, request.title, request.source,
+                                      [chunk.model_dump() for chunk in request.chunks])
+    except VersionConflict as exception:
+        raise HTTPException(status_code=409, detail={"code": exception.code}) from exception
     except BackendUnavailable as exception:
         raise HTTPException(status_code=503, detail=str(exception)) from exception
-    return IndexResponse(backend=backend.name, indexed_chunks=indexed)
-
-
-@app.post("/v1/documents/delete", response_model=DeleteResponse, dependencies=[Depends(verify_token)])
-def delete_document(request: DeleteDocumentRequest) -> DeleteResponse:
-    try:
-        deleted = backend.delete_document(request.document_key)
-    except BackendUnavailable as exception:
-        raise HTTPException(status_code=503, detail=str(exception)) from exception
-    return DeleteResponse(backend=backend.name, deleted_chunks=deleted)
+    return SyncResponse(document_key=request.document_key, version=request.version, action=request.action,
+                        payload_hash=request.payload_hash, applied=True, backend=backend.name, indexed_chunks=count)
 
 
 @app.post("/v1/query", response_model=QueryResponse, dependencies=[Depends(verify_token)])

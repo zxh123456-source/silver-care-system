@@ -5,6 +5,7 @@ import io.swagger.annotations.ApiModelProperty;
 import lombok.Data;
 
 import java.util.List;
+import java.math.BigDecimal;
 
 @Data
 @ApiModel(value = "新增点餐请求实体")
@@ -15,7 +16,7 @@ public class AddOrderQuery {
     private String dineDate;
     @ApiModelProperty(value = "就餐方式", required = true, example = "送餐/堂食")
     private String dineType;
-    @ApiModelProperty(value = "就餐方式", required = true, example = "[{'dishesId':1,'orderNum':2}]")
+    @ApiModelProperty(value = "就餐方式", required = true, example = "[{\"dishesId\":1,\"orderNum\":2}]")
     private List<AddOrderDishesQuery> orderDishesList;
 
     @Data
@@ -24,6 +25,7 @@ public class AddOrderQuery {
         @ApiModelProperty(value = "菜品编号", required = true, example = "1")
         private Long dishesId;
         @ApiModelProperty(value = "菜品份数", required = true, example = "2")
-        private Integer orderNum;
+        // Integer binding would silently truncate a JSON number such as 1.5.
+        private BigDecimal orderNum;
     }
 }

@@ -72,18 +72,34 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, toRefs, ref } from "vue";
+import { onMounted, ref } from "vue";
 import { Delete, Search } from "@element-plus/icons-vue";
 import { listBuilding, listFloorByBuildingId, listRoomByKey } from "@/apis/bedPanorama";
+import malePortrait from "@/assets/imgs/img.png";
+import femalePortrait from "@/assets/imgs/img_1.png";
+import unknownPortrait from "@/assets/imgs/img_2.png";
 
+interface Building {
+  id: number;
+  name: string;
+}
+
+interface Floor {
+  id: number;
+  buildingId: number;
+  name: string;
+}
+
+const buildingList: Building[] = [];
+const floorList: Floor[] = [];
 const bedList: any[] = [];
 
 const data = ref({
   buildingId: "",
   floorId: "",
   elderName: "",
-  buildingList: [],
-  floorList: [],
+  buildingList,
+  floorList,
   roomList: [],
   bedList
 }).value;
@@ -131,11 +147,11 @@ const getBedList = async () => {
 
 const getImgUrl = (sex: string) => {
   if (sex === "男") {
-    return require("@/assets/imgs/img.png");
+    return malePortrait;
   } else if (sex === "女") {
-    return require("@/assets/imgs/img_1.png");
+    return femalePortrait;
   } else {
-    return require("@/assets/imgs/img_2.png");
+    return unknownPortrait;
   }
 };
 

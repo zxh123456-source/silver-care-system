@@ -1,4 +1,4 @@
-export namespace Table {
+export declare namespace Table {
   export interface Pageable {
     pageNum: number
     pageSize: number
@@ -22,6 +22,6 @@ export namespace Table {
   }
 }
 
-export namespace HandleData {
+export declare namespace HandleData {
   export type MessageType = '' | 'success' | 'warning' | 'info' | 'error'
 }

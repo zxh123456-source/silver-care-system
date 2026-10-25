@@ -30,8 +30,8 @@ export const INurseTypeList = [
 // 分页查询护理等级
 export async function pageNurseGradeByKey(data: IPageNurseGradeByKey) {
   // 因为后台返回的字段与前端表单数据的prop不一样，但是组件封装是需要一样的，所以请求前增加一些这两个字段
-  Reflect.has(data, 'name') ? (data.gradeName = data.name) : ''
-  Reflect.has(data, 'type') ? (data.nurseType = data.type) : ''
+  if (Reflect.has(data, 'name')) data.gradeName = data.name
+  if (Reflect.has(data, 'type')) data.nurseType = data.type
   return http.get("/api/nurseGrade/pageNurseGradeByKey", {
     params: {
       ...data

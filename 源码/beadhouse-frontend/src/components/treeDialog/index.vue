@@ -15,15 +15,23 @@
 </template>
 
 <script setup lang="ts" name="useProTable">
-import { ref } from "vue";
-import { getBuildTree } from "@/apis/bookManage";
+import { onBeforeUnmount, ref, watch } from "vue";
+import { captureResourceSession, isResourceSessionCurrent } from "@/utils/authResource";
+import type { ResourceSession } from "@/utils/authResource";
+import { ElMessage } from "element-plus";
 
 const data: any = ref();
 const dialogVisible = ref(false);
 const drawerProps = ref<DialogProps>();
+let epoch = 0;
+let session: ResourceSession | undefined;
+watch(dialogVisible, visible => { if (!visible) epoch++; }, { flush: "sync" });
+const sessionChanged = () => { if (session && !isResourceSessionCurrent(session)) { data.value = []; dialogVisible.value = false; } };
+window.addEventListener("storage", sessionChanged);
+onBeforeUnmount(() => { epoch++; window.removeEventListener("storage", sessionChanged); });
 
 interface DialogProps {
-  treeApi: (params: any) => Promise<any>;
+  treeApi: () => Promise<any>;
 }
 
 const defaultProps = {
@@ -34,10 +42,18 @@ const defaultProps = {
 
 // 接收父组件传过来的参数
 const treeAcceptParams = async (params: DialogProps) => {
-  drawerProps.value = params;
-  dialogVisible.value = true;
-  const res: any = await getBuildTree();
-  data.value = res.data;
+  const version = ++epoch;
+  try {
+    const captured = captureResourceSession();
+    session = captured;
+    drawerProps.value = params;
+    data.value = [];
+    dialogVisible.value = true;
+    const res: any = await params.treeApi();
+    if (version !== epoch || !isResourceSessionCurrent(captured)) return;
+    if (res.code !== 200) { ElMessage.error("床位列表读取失败，请重试"); return; }
+    data.value = res.data;
+  } catch { if (version === epoch) ElMessage.error("床位列表读取失败，请重试"); }
 };
 // 将方法主动暴露出来
 defineExpose({
@@ -50,6 +66,7 @@ const emit = defineEmits<{
 }>();
 // 向父组件传值
 const checkBed = (bed: any) => {
+  if (!dialogVisible.value || !session || !isResourceSessionCurrent(session)) return;
   if (bed.level === 4) {
     emit("getCheckBedInfo", bed);
     dialogVisible.value = false;
