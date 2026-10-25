@@ -21,7 +21,12 @@ class CommandEvidenceTests(unittest.TestCase):
             try:
                 # Advance the test clock after both writes are observed, so a
                 # slow Windows process launch cannot erase the fixture's output.
+                clock_started = False
                 def clock():
+                    nonlocal clock_started
+                    if not clock_started:
+                        clock_started = True
+                        return 0
                     return 2 if log.exists() and b"stderr-evidence" in log.read_bytes() else 0
                 with mock.patch.object(checks.time, "monotonic", side_effect=clock):
                     with self.assertRaisesRegex(TimeoutError, "command.log"):
