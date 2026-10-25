@@ -322,6 +322,7 @@ function Invoke-LifecycleCommand([string]$FilePath, [string[]]$Arguments, [strin
         $info.WorkingDirectory=$WorkingDirectory; $info.UseShellExecute=$false; $info.CreateNoWindow=$true
         $info.WindowStyle=[Diagnostics.ProcessWindowStyle]::Hidden
         $info.RedirectStandardInput=$true; $info.RedirectStandardOutput=$true; $info.RedirectStandardError=$true
+        $info.StandardInputEncoding=[Text.UTF8Encoding]::new($false)
         foreach ($argument in @('-NoProfile','-NonInteractive','-File',$MyInvocation.MyCommand.ScriptBlock.File,'-CommandWorker')) { $info.ArgumentList.Add($argument) }
         $worker=Start-LifecycleSupervisor $info
         # The worker is inert until this succeeds. Never fall back to an
@@ -379,6 +380,8 @@ function Invoke-LifecycleCommand([string]$FilePath, [string[]]$Arguments, [strin
 }
 
 function Invoke-LifecycleCommandWorker {
+    # This private pipe carries UTF-8 JSON, independently of the Windows OEM code page.
+    [Console]::InputEncoding=[Text.UTF8Encoding]::new($false)
     $line=[Console]::In.ReadLine()
     if ([string]::IsNullOrEmpty($line)) { return 125 }
     $payload=$line | ConvertFrom-Json -AsHashtable

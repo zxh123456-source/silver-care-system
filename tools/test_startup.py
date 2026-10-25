@@ -331,6 +331,40 @@ $answer=@{arguments=@(Get-Content -LiteralPath $env:SC_NATIVE_ARGV -Raw | Conver
 """, extra={"PYTHONPATH": self.root, "SC_NATIVE_ARGV": native_argv})
                 self.assertEqual(answer["arguments"][1:], [])
 
+    def test_dependency_command_unicode_protocol_ignores_console_code_page(self):
+        fixture = self.root / "编码 记录.py"
+        fixture.write_text(
+            "import json,os,sys\n"
+            "print(json.dumps(dict(arguments=sys.argv[1:],cwd=os.getcwd())))\n", encoding="utf-8")
+        arguments = ["中文 空格", "éuro €", "", 'a"b', "ends with slash\\"]
+        (self.root / "unicode-arguments.json").write_text(json.dumps(arguments, ensure_ascii=False), encoding="utf-8")
+        answer = self.result("""
+# Model an English Windows OEM console independently of the host locale.
+$originalInputEncoding=[Console]::InputEncoding
+$originalOutputEncoding=[Console]::OutputEncoding
+try {
+[Console]::InputEncoding=[Text.Encoding]::GetEncoding(437)
+$originalSupervisor=${function:Start-LifecycleSupervisor}
+function Start-LifecycleSupervisor([Diagnostics.ProcessStartInfo]$StartInfo) {
+    $StartInfo.ArgumentList.Clear()
+    foreach($argument in @('-NoProfile','-NonInteractive','-Command',
+        '[Console]::InputEncoding=[Text.Encoding]::GetEncoding(437); . $env:SC_HELPER; exit (Invoke-LifecycleCommandWorker)')) {
+        $StartInfo.ArgumentList.Add($argument)
+    }
+    & $originalSupervisor $StartInfo
+}
+$arguments=@($env:SC_FIXTURE) + @(Get-Content -LiteralPath $env:SC_ARGUMENTS -Raw | ConvertFrom-Json)
+$log=Join-Path $env:SC_ROOT 'unicode-protocol.log'
+Invoke-LifecycleCommand -FilePath $env:SC_PYTHON -Arguments $arguments -WorkingDirectory $env:SC_ROOT -LogPath $log -TimeoutSeconds 10
+$answer=@{reported=(Get-Content -LiteralPath $log -Raw | ConvertFrom-Json);callerCodePage=[Console]::InputEncoding.CodePage}
+} finally {
+    [Console]::InputEncoding=$originalInputEncoding
+    [Console]::OutputEncoding=$originalOutputEncoding
+}
+""", extra={"SC_FIXTURE": fixture, "SC_ARGUMENTS": self.root / "unicode-arguments.json"})
+        self.assertEqual(answer["reported"], {"arguments": arguments, "cwd": str(self.root)})
+        self.assertEqual(answer["callerCodePage"], 437)
+
     def test_dependency_command_closes_stdin_after_its_single_payload(self):
         answer = self.result("""
 $log=Join-Path $env:SC_ROOT 'stdin-eof.log'
