@@ -229,6 +229,12 @@ PowerShell 下运行后端测试时，设置仅用于测试的 `JWT_SECRET`（�
 
 Windows 上的 `python tools/startup_acceptance.py --action fresh` 会把当前已跟踪源码复制到 `.runtime/startup-check/<运行编号>/中文 空格 项目`，自动分配独立端口与 Compose 项目、新建数据卷，并实际调用 `启动AI养老院.ps1 -Prepare -InitializeDemo -AcknowledgeDemoOnly`。不会复制源项目的私有配置、依赖、构建产物或业务数据；先将新增公开脚本加入 Git 跟踪。已有的软件包、镜像、模型下载缓存可复用，因此不等同于新装操作系统或无缓存联网安装验收。
 
+每次启动的前置命令写入 `.runtime/logs/<ComposeProject>/commands/<运行ID>/`：保留各自stdout、`.stderr`、`.events.jsonl`及`startup-events.jsonl`，后续启动不会覆盖这一组证据。事件只记录阶段、时间、耗时、结果和worker PID，不记录命令参数或环境变量。应用日志仍在原目录。应用的`.log.supervisor.events.jsonl`另外记录logger/child PID、退出码和异常类别，区分应用先退与日志进程异常清理；不记录argv/env。长应用stdin由logger独立持有，不依赖调用者输入管道寿命。
+
+Docker/JDK/Python前置检查和Milvus认证命令使用当前`-TimeoutSeconds`预算；预算包含命令与输出管道完成。完整`-Prepare`构建/依赖安装保持单独的长任务语义，不使用健康探针预算。每个短命命令使用独立Windows Job和门控worker，超时或启动器退出时只回收该命令树（[Windows Job说明](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)）。前端单独修复若复用已登记RAG进程，不重复导入ML依赖，仍执行真实身份、BGE和Milvus认证检查。
+
+离线启动/超时回归：`python -m unittest discover -s tools -p "test_startup*.py" -v`。真实故障验收的外层deadline保留原计算方式；超时输出持久保存在`direct-<动作>-<ID>.log`，`.cleanup.log`记录只回滚本轮新增进程/容器，原有运行服务和卷保留。
+
 启动后默认保留隔离服务供业务验收，输出的 `acceptance.json` 是该次运行的恢复入口。下面的 `RUN`、`COPY`、`PORT` 用该次输出值替换，业务浏览器脚本另需 `.github/e2e/requirements.txt` 和已安装的 Chromium：
 
 ```powershell
@@ -243,4 +249,4 @@ python tools/startup_acceptance.py --manifest "RUN/acceptance.json" --action sto
 
 这组检查覆盖真实登录、老人测量写入与复读、Java异步制度同步到Python/Milvus及可见引用、重复启动、记录端口重启、缺配置停止、外来监听拒绝、失败回滚，以及只修复前端失败时保留原Java/RAG和五个容器。运行环境与首次启动保持一致（JDK 8、工具路径、模型缓存等）；证据、日志和截图留在该次被Git忽略的目录，停止保留卷，不操作日常数据库。浏览器人工复核可用独立命名的 `playwright-cli` 会话完成；不要把凭据放进命令行或提交截图中的私人数据。
 
-本轮没有进行旧依赖升级：2026-10-21 的 `npm ci` 报告98项审计告警（10低、44中、38高、6严重），尚需单独评估与修复，不能把构建成功解释为依赖安全审计通过。真实SMTP、付费模型、OCR中文模型和其他浏览器/移动端不属于本次启动闭环的已验证范围。
+历史98项旧依赖审计告警已在后续依赖整改中清零，完整与生产依赖审计均纳入CI；参见上方“配置回归检查”和协作验收记录。真实SMTP、付费模型、OCR中文模型和其他浏览器/移动端不属于本次启动闭环的已验证范围。

@@ -11,10 +11,9 @@ from pathlib import Path
 import shutil
 import socket
 import subprocess
-import tempfile
 import time
-from types import SimpleNamespace
 import urllib.request
+import uuid
 
 from startup_acceptance import invoke, isolated_environment, validate_manifest
 
@@ -24,6 +23,82 @@ ROOT = Path(__file__).resolve().parents[1]
 def process_key(item):
     created = datetime.fromisoformat(item["createdUtc"].replace("Z", "+00:00"))
     return item["pid"], created.astimezone(timezone.utc).isoformat(timespec="microseconds")
+
+
+def new_process_identities(before, observed):
+    original = {process_key(item) for item in before}
+    return [item for item in observed if process_key(item) not in original]
+
+
+def running_project_containers(docker, compose_project, project):
+    ids = subprocess.check_output([docker, "ps", "-aq", "--filter",
+                                   "label=com.docker.compose.project=" + compose_project], text=True).split()
+    if not ids:
+        return []
+    result = []
+    for item in json.loads(subprocess.check_output([docker, "inspect", *ids])):
+        labels = item["Config"]["Labels"]
+        if (labels.get("com.docker.compose.project") != compose_project
+                or Path(labels.get("com.docker.compose.project.working_dir", "")).resolve() != project):
+            raise ValueError("Container ownership mismatch; timeout baseline was not captured")
+        if item["State"]["Running"]:
+            result.append(item["Id"])
+    return result
+
+
+def run_monitored_command(command, *, cwd, env, log, timeout, observe, on_timeout):
+    """Keep output even on timeout; cleanup is restricted by the caller's baseline."""
+    with log.open("wb") as output:
+        process = subprocess.Popen(command, cwd=cwd, env=env, stdout=output, stderr=subprocess.STDOUT)
+        deadline = time.monotonic() + timeout
+        try:
+            while process.poll() is None:
+                observe()
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"Lifecycle command exceeded {timeout}s; output retained: {log}")
+                time.sleep(.25)
+            observe()
+        except BaseException:
+            if process.poll() is None:
+                process.kill()
+            process.wait(timeout=10)
+            on_timeout()
+            raise
+    return subprocess.CompletedProcess(command, process.returncode, log.read_bytes())
+
+
+def cleanup_timed_out_command(manifest, before, observed, running_before, pwsh, docker, log):
+    """Stop only newly created resources, leaving original live services untouched."""
+    project = Path(manifest["projectRoot"])
+    env = isolated_environment(project)
+    env.update(SC_CHECK_HELPER=str(project / "启停工具.ps1"), SC_CHECK_ROOT=str(project),
+               SC_CHECK_PROJECT=manifest["composeProject"], SC_CHECK_DOCKER=docker,
+               SC_CHECK_NEW=json.dumps(new_process_identities(before, observed)),
+               SC_CHECK_RUNNING=json.dumps(running_before))
+    script = """
+$ErrorActionPreference='Stop'
+. $env:SC_CHECK_HELPER
+$items=@($env:SC_CHECK_NEW | ConvertFrom-Json -AsHashtable)
+$running=@($env:SC_CHECK_RUNNING | ConvertFrom-Json)
+foreach($item in @($items | Sort-Object {if($_.name -like '*-logger'){1}else{0}})) {
+    Stop-OwnedProcess $item
+}
+foreach($container in @(Get-LifecycleContainers $env:SC_CHECK_DOCKER $env:SC_CHECK_PROJECT $env:SC_CHECK_ROOT)) {
+    if($container.running -and $container.id -notin $running) { Stop-OwnedContainer $container $env:SC_CHECK_DOCKER }
+}
+$path=Join-Path $env:SC_CHECK_ROOT ".runtime/lifecycle-$env:SC_CHECK_PROJECT.json"
+$state=Read-LifecycleState -Path $path -ProjectRoot $env:SC_CHECK_ROOT -ComposeProject $env:SC_CHECK_PROJECT
+if($state) {
+    $state.processes=@($state.processes | Where-Object {Test-ProcessIdentity $_})
+    $registered=@($state.containers | ForEach-Object {$_.id})
+    $state.containers=@(Get-LifecycleContainers $env:SC_CHECK_DOCKER $env:SC_CHECK_PROJECT $env:SC_CHECK_ROOT |
+        Where-Object {$_.id -in $registered})
+    Save-LifecycleState $state $path
+}
+"""
+    with log.open("wb") as output:
+        subprocess.run([pwsh, "-NoProfile", "-NonInteractive", "-Command", script], env=env,
+                       stdout=output, stderr=subprocess.STDOUT, timeout=90, check=True)
 
 
 def run(manifest_path, phase):
@@ -80,29 +155,25 @@ def run(manifest_path, phase):
             if not reuse_ports:
                 for key, value in manifest["ports"].items():
                     command.extend(("-" + key, str(value)))
-        with tempfile.TemporaryFile() as output:
-            process = subprocess.Popen(command, cwd=manifest_path.parent, env=isolated_environment(project),
-                                       stdout=output, stderr=subprocess.STDOUT)
-            deadline = time.monotonic() + timeout * 6 + 90
-            while process.poll() is None:
-                if state_path.exists():
-                    try:
-                        state()  # Observe identities before rollback or stop removes them.
-                    except FileNotFoundError:
-                        pass  # A successful stop atomically removed its state meanwhile.
-                if time.monotonic() >= deadline:
-                    process.kill()
-                    process.wait(timeout=10)
-                    # The product stop entry point validates every saved identity itself.
-                    with (manifest_path.parent / "timeout-owned-stop.log").open("wb") as cleanup:
-                        subprocess.run([pwsh, "-NoProfile", "-File", str(project / "停止AI养老院.ps1"),
-                                        "-ComposeProject", manifest["composeProject"]],
-                                       env=isolated_environment(project), stdout=cleanup,
-                                       stderr=subprocess.STDOUT, timeout=90, check=True)
-                    raise TimeoutError("Lifecycle command timed out; tracked services were stopped, evidence retained")
-                time.sleep(.25)
-            output.seek(0)
-            return SimpleNamespace(returncode=process.returncode, stdout=output.read())
+        def observe():
+            if state_path.exists():
+                try:
+                    state()
+                except FileNotFoundError:
+                    pass  # A successful stop atomically removed its state meanwhile.
+
+        observe()
+        before = list(observed_processes.values())
+        running_before = running_project_containers(docker, manifest["composeProject"], project)
+        log = manifest_path.parent / f"direct-{action}-{uuid.uuid4().hex}.log"
+
+        def cleanup():
+            observe()
+            cleanup_timed_out_command(manifest, before, list(observed_processes.values()), running_before,
+                                      pwsh, docker, log.with_suffix(".cleanup.log"))
+
+        return run_monitored_command(command, cwd=manifest_path.parent, env=isolated_environment(project),
+                                     log=log, timeout=timeout * 6 + 90, observe=observe, on_timeout=cleanup)
 
     def assert_stopped(value):
         assert not any(running for _, running in containers(value)), "An owned container remained running"

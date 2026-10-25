@@ -16,18 +16,29 @@ $config = Get-LifecycleConfiguration -ProjectRoot $PSScriptRoot -Parameters $PSB
 $projectRoot=$config.projectRoot; $ports=$config.ports
 $logDir = Join-Path $projectRoot ".runtime/logs/$($config.composeProject)"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+$runId=[Guid]::NewGuid().ToString('N')
+$commandLogDir=Join-Path $logDir "commands/$runId"
+New-Item -ItemType Directory -Force -Path $commandLogDir | Out-Null
+$startupClock=[Diagnostics.Stopwatch]::StartNew()
+function Write-StartupStage([string]$Name) {
+    @{runId=$runId;utc=[DateTime]::UtcNow.ToString('o');phase=$Name;elapsedMilliseconds=$startupClock.ElapsedMilliseconds} |
+        ConvertTo-Json -Compress | Add-Content -LiteralPath (Join-Path $commandLogDir 'startup-events.jsonl') -Encoding utf8
+}
+Write-Host "本次前置命令与阶段日志：$commandLogDir"
+Write-StartupStage 'lock'
+
 $lifecycleLock=Enter-LifecycleLock $config.statePath
 try {
+    Write-StartupStage 'environment'
     . (Join-Path $projectRoot '校验环境.ps1')
     Assert-ProjectEnvironment
     $docker = (Get-Command docker -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
     $node = (Get-Command $(if ($env:SILVERCARE_NODE) { $env:SILVERCARE_NODE } else { 'node' }) -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
     $java = if ($env:SILVERCARE_JAVA) { $env:SILVERCARE_JAVA } elseif ($env:JAVA_HOME) { Join-Path $env:JAVA_HOME 'bin/java.exe' } else { (Get-Command java -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source }
     if (-not (Test-Path -LiteralPath $java)) { throw 'JAVA_HOME/SILVERCARE_JAVA 未指向有效 JDK。' }
-    & $docker info --format '{{.ServerVersion}}' 2>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'Docker Desktop 未就绪。' }
-    & $docker compose version --short 2>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw '需要 Docker Compose v2。' }
+    Write-StartupStage 'docker-preflight'
+    Invoke-LifecycleCommand $docker @('info','--format','{{.ServerVersion}}') $projectRoot (Join-Path $commandLogDir 'docker-info.log') -TimeoutSeconds $TimeoutSeconds
+    Invoke-LifecycleCommand $docker @('compose','version','--short') $projectRoot (Join-Path $commandLogDir 'compose-version.log') -TimeoutSeconds $TimeoutSeconds
     $env:COMPOSE_PROJECT_NAME=$config.composeProject
     $env:MYSQL_PORT=[string]$ports.MysqlPort; $env:REDIS_PORT=[string]$ports.RedisPort
     $env:MILVUS_PORT=[string]$ports.MilvusPort; $env:MILVUS_HEALTH_PORT=[string]$ports.MilvusHealthPort
@@ -57,8 +68,9 @@ try {
     }
     $fingerprint=Get-LifecycleFingerprint $projectRoot
     $composeArguments=@('compose','--project-name',$config.composeProject,'--project-directory',$projectRoot,'-f',(Join-Path $projectRoot 'docker-compose.yml'))
-    & $docker @composeArguments config --quiet 2>$null
-    if ($LASTEXITCODE -ne 0) { throw 'Docker Compose 配置校验失败；请检查 .env 和 compose 文件（未打印密钥）。' }
+    Write-StartupStage 'configuration'
+    Invoke-LifecycleCommand $docker ($composeArguments + @('config','--quiet')) $projectRoot (Join-Path $commandLogDir 'compose-config.log') -TimeoutSeconds $TimeoutSeconds
+    Write-StartupStage 'ownership-and-ports'
     $state=Read-LifecycleState -Path $config.statePath -ProjectRoot $projectRoot -ComposeProject $config.composeProject
     if (-not $state) { $state=@{schemaVersion=1;projectRoot=$projectRoot;composeProject=$config.composeProject;ports=$ports;instanceId=[Guid]::NewGuid().ToString('N');processes=@();containers=@()} }
     $liveProcesses=@($state.processes | Where-Object { Test-ProcessIdentity $_ })
@@ -88,38 +100,45 @@ try {
     $aiDir=Join-Path $projectRoot '源码/beadhouse-ai'; $backendDir=Join-Path $projectRoot '源码/beadhouse-backend'; $frontendDir=Join-Path $projectRoot '源码/beadhouse-frontend'
     $python=Get-WindowsToolPath (Join-Path $aiDir '.venv/Scripts/python.exe'); $jar=Join-Path $backendDir 'target/beadhouse-backend-0.0.1-SNAPSHOT.jar'
     $vite=Join-Path $frontendDir 'node_modules/vite/bin/vite.js'
-    Invoke-LifecycleCommand $java @('-version') $backendDir (Join-Path $logDir 'java-version.log')
-    $javaVersion=(Get-Content -LiteralPath (Join-Path $logDir 'java-version.log') -Raw) + (Get-Content -LiteralPath (Join-Path $logDir 'java-version.log.stderr') -Raw)
+    Write-StartupStage 'artifacts'
+    Invoke-LifecycleCommand $java @('-version') $backendDir (Join-Path $commandLogDir 'java-version.log') -TimeoutSeconds $TimeoutSeconds
+    $javaVersion=(Get-Content -LiteralPath (Join-Path $commandLogDir 'java-version.log') -Raw) + (Get-Content -LiteralPath (Join-Path $commandLogDir 'java-version.log.stderr') -Raw)
     if ($javaVersion -notmatch 'version "1\.8\.') { throw '本项目要求 JDK 8；请设置 JAVA_HOME 或 SILVERCARE_JAVA。' }
     $env:JAVA_HOME=Split-Path (Split-Path $java)
     if ($Prepare) {
         if ($liveProcesses.Count) { throw 'Prepare 需要应用已停止，避免覆盖运行中的依赖或 JAR。' }
         if (-not (Test-Path -LiteralPath (Join-Path $env:JAVA_HOME 'bin/javac.exe'))) { throw 'Prepare 要求完整 JDK 8（含 javac），不能使用 JRE。' }
-        Write-Host "准备后端 JAR；日志：$(Join-Path $logDir 'prepare-maven.log')"
+        Write-Host "准备后端 JAR；日志：$(Join-Path $commandLogDir 'prepare-maven.log')"
         $maven=(Get-Command $(if ($env:SILVERCARE_MAVEN) { $env:SILVERCARE_MAVEN } else { 'mvn.cmd' }) -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
-        $mavenCmd=Join-Path $logDir 'prepare-maven.cmd'
+        $mavenCmd=Join-Path $commandLogDir 'prepare-maven.cmd'
         [IO.File]::WriteAllText($mavenCmd, ('@call "' + $maven + '" package -DskipTests' + [Environment]::NewLine), [Text.Encoding]::Default)
-        Invoke-LifecycleCommand $env:ComSpec @('/d','/c',$mavenCmd) $backendDir (Join-Path $logDir 'prepare-maven.log')
-        Write-Host "安装前端依赖；日志：$(Join-Path $logDir 'prepare-npm.log')"
+        Invoke-LifecycleCommand $env:ComSpec @('/d','/c',$mavenCmd) $backendDir (Join-Path $commandLogDir 'prepare-maven.log')
+        Write-Host "安装前端依赖；日志：$(Join-Path $commandLogDir 'prepare-npm.log')"
         $npm=(Get-Command npm.cmd -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
         $npmCli=Join-Path (Split-Path $npm) 'node_modules/npm/bin/npm-cli.js'
         if (-not (Test-Path -LiteralPath $npmCli)) { throw '无法定位 npm-cli.js，请安装包含 npm 的 Node.js。' }
-        Invoke-LifecycleCommand $node @($npmCli,'ci') $frontendDir (Join-Path $logDir 'prepare-npm.log')
-        Write-Host "准备 Python 3.12 和 AI 依赖；日志：$(Join-Path $logDir 'prepare-pip.log')"
+        Invoke-LifecycleCommand $node @($npmCli,'ci') $frontendDir (Join-Path $commandLogDir 'prepare-npm.log')
+        Write-Host "准备 Python 3.12 和 AI 依赖；日志：$(Join-Path $commandLogDir 'prepare-pip.log')"
         if (-not (Test-Path -LiteralPath $python)) {
             $basePython=(Get-Command $(if ($env:SILVERCARE_PYTHON) { $env:SILVERCARE_PYTHON } else { 'py' }) -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
             $prefix=if ([IO.Path]::GetFileNameWithoutExtension($basePython) -eq 'py') { @('-3.12') } else { @() }
-            Invoke-LifecycleCommand $basePython ($prefix + @('-c','import sys; assert sys.version_info[:2] == (3,12), "Python 3.12 required"')) $aiDir (Join-Path $logDir 'prepare-python-base.log')
-            Invoke-LifecycleCommand $basePython ($prefix + @('-m','venv',(Join-Path $aiDir '.venv'))) $aiDir (Join-Path $logDir 'prepare-venv.log')
+            Invoke-LifecycleCommand $basePython ($prefix + @('-c','import sys; assert sys.version_info[:2] == (3,12), "Python 3.12 required"')) $aiDir (Join-Path $commandLogDir 'prepare-python-base.log')
+            Invoke-LifecycleCommand $basePython ($prefix + @('-m','venv',(Join-Path $aiDir '.venv'))) $aiDir (Join-Path $commandLogDir 'prepare-venv.log')
             $python=Get-WindowsToolPath (Join-Path $aiDir '.venv/Scripts/python.exe')
         }
-        Invoke-LifecycleCommand $python @('-c','import sys; assert sys.version_info[:2] == (3,12), "Python 3.12 required"') $aiDir (Join-Path $logDir 'prepare-python.log')
-        try { Invoke-LifecycleCommand $python @('-m','pip','install','-r',(Join-Path $aiDir 'requirements.txt')) $aiDir (Join-Path $logDir 'prepare-pip.log') } catch {
+        Invoke-LifecycleCommand $python @('-c','import sys; assert sys.version_info[:2] == (3,12), "Python 3.12 required"') $aiDir (Join-Path $commandLogDir 'prepare-python.log')
+        try { Invoke-LifecycleCommand $python @('-m','pip','install','-r',(Join-Path $aiDir 'requirements.txt')) $aiDir (Join-Path $commandLogDir 'prepare-pip.log') } catch {
             throw "AI 依赖安装失败：$($_.Exception.Message) 如日志出现 Windows 路径过长，请将项目放在更短路径（保留本项目现有数据）；脚本会优先使用可用的工具短路径，不修改系统设置。"
         }
     }
     foreach ($artifact in @($python,$jar,$vite)) { if (-not (Test-Path -LiteralPath $artifact)) { throw '缺少构建产物或依赖；请先使用 -Prepare。' } }
-    Invoke-LifecycleCommand $python @('-c','import sys, uvicorn, fastembed, pymilvus; assert sys.version_info[:2] == (3,12), "Python 3.12 required"') $aiDir (Join-Path $logDir 'python-check.log')
+    Write-StartupStage 'python-dependencies'
+    if (-not @($liveProcesses | Where-Object name -EQ 'rag').Count) {
+        Invoke-LifecycleCommand $python @('-c','import sys, uvicorn, fastembed, pymilvus; assert sys.version_info[:2] == (3,12), "Python 3.12 required"') $aiDir (Join-Path $commandLogDir 'python-check.log') -TimeoutSeconds $TimeoutSeconds
+    } else {
+        @{utc=[DateTime]::UtcNow.ToString('o');event='skipped';reason='existing-registered-rag-process'} |
+            ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $commandLogDir 'python-check.skipped.json') -Encoding utf8
+    }
     $state.processes=$liveProcesses; $state.ports=$ports; $state.configurationFingerprint=$fingerprint
     Save-LifecycleState $state $config.statePath
     $newProcesses=[Collections.Generic.List[object]]::new(); $newContainers=@()
@@ -133,6 +152,7 @@ try {
         }
     }.GetNewClosure()
     try {
+        Write-StartupStage 'infrastructure'
         Write-Host "启动并检查基础设施；日志：$(Join-Path $logDir 'compose.log')"
         Start-LifecycleInfrastructure $state $config.statePath $docker $composeArguments (Join-Path $logDir 'compose.log')
         $newContainers=@($state.containers | Where-Object { $_.running -and $_.id -notin $runningBefore })
@@ -145,15 +165,18 @@ try {
             }
         }
         Wait-LifecycleCondition -TimeoutSeconds $TimeoutSeconds -Description 'Milvus HTTP' -Condition { (Invoke-WebRequest -NoProxy "http://127.0.0.1:$($ports.MilvusHealthPort)/healthz" -TimeoutSec 5).StatusCode -eq 200 }
+        Write-StartupStage 'milvus-authentication'
         Wait-LifecycleCondition -TimeoutSeconds $TimeoutSeconds -Description 'Milvus 认证连接' -Condition {
-            & $python -c 'import os; from pymilvus import MilvusClient; c=MilvusClient(uri=os.environ["RAG_MILVUS_URI"],token=os.environ["RAG_MILVUS_TOKEN"],timeout=5); c.list_collections(timeout=5); c.close()' 2>$null | Out-Null
-            $LASTEXITCODE -eq 0
+            Invoke-LifecycleCommand $python @('-c','import os; from pymilvus import MilvusClient; c=MilvusClient(uri=os.environ["RAG_MILVUS_URI"],token=os.environ["RAG_MILVUS_TOKEN"],timeout=5); c.list_collections(timeout=5); c.close()') $aiDir (Join-Path $commandLogDir 'milvus-auth.log') -TimeoutSeconds $TimeoutSeconds
+            $true
         }
+        Write-StartupStage 'database'
         $mysqlId=($state.containers | Where-Object service -EQ 'mysql').id
         & (Join-Path $projectRoot '检查数据库.ps1') -Container $mysqlId
         if ($InitializeDemo) { & (Join-Path $projectRoot '初始化演示账号.ps1') -UseCurrentEnvironment }
         $uploadDir=Join-Path $projectRoot ".runtime/uploads/$($config.composeProject)"
         New-Item -ItemType Directory -Force -Path $uploadDir | Out-Null
+        Write-StartupStage 'start-applications'
         foreach ($name in @('rag','backend','frontend')) {
             if (@($state.processes | Where-Object name -EQ $name).Count) { continue }
             Write-Host "启动 $name；日志目录：$logDir"
@@ -165,6 +188,7 @@ try {
             }
             Start-LifecycleProcess $name $launch.file $launch.arguments $launch.directory $projectRoot $logDir -OnIdentity $checkpointIdentity | Out-Null
         }
+        Write-StartupStage 'http-readiness'
         Write-Host '等待真实 HTTP、BGE 模型、Milvus 和前端代理健康检查。'
         Wait-LifecycleCondition -TimeoutSeconds $TimeoutSeconds -Description 'RAG BGE + Milvus 认证诊断' -Condition {
             $health=Invoke-RestMethod -NoProxy "http://127.0.0.1:$($ports.RagPort)/health" -TimeoutSec 5
@@ -186,6 +210,7 @@ try {
             $key=@{rag='RagPort';backend='BackendPort';frontend='FrontendPort'}[$name]
             Assert-LifecyclePort $ports[$key] $identity
         }
+        Write-StartupStage 'ready'
         Write-Host "系统已通过健康检查：http://127.0.0.1:$($ports.FrontendPort)；日志：$logDir" -ForegroundColor Green
     } catch {
         $newContainers=@($state.containers | Where-Object { $_.running -and $_.id -notin $runningBefore })

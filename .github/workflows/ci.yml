@@ -38,7 +38,7 @@ jobs:
           }
       - name: Verify lifecycle safety with real owned processes
         shell: pwsh
-        run: python -m unittest discover -s tools -p test_startup.py -v
+        run: python -m unittest discover -s tools -p 'test_startup*.py' -v
 
   database:
     name: Database / migrations + isolated restore
