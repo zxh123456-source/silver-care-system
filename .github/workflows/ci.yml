@@ -144,6 +144,10 @@ jobs:
           exit 1
       - name: Build and run all backend tests
         run: mvn --batch-mode --no-transfer-progress -Dfile.encoding=UTF-8 verify
+      - name: Require fixed care quality evidence
+        run: |
+          python3 ../../tools/evaluate_care.py --check-report
+          python3 -m unittest discover -s ../../tools -p test_care_evaluation.py -v
       - name: Require all seventeen integration suites to execute
         if: always()
         run: |
@@ -196,6 +200,7 @@ jobs:
           path: |
             源码/beadhouse-backend/target/surefire-reports/
             源码/beadhouse-backend/target/care-alert-concurrency-innodb.txt
+            源码/beadhouse-backend/target/ai-quality/report.json
           if-no-files-found: warn
           retention-days: 7
       - name: Remove authenticated test Redis
