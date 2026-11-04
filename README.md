@@ -191,7 +191,7 @@ RAG使用MySQL版本快照与领取租约、Python持久化墓碑与跨进程文
 
 开发服务预优化Element Plus实际样式入口，避免首次登录/懒路由发现新依赖后整页重载。启动和状态脚本对本机健康/鉴权探针显式绕过系统代理，外部下载及非本机请求保留原代理设置。
 
-旧 Vue CLI 构建链已迁移为 Vite。Tailwind 4 使用独立 PostCSS 插件和 `src/styles/tailwind.css`，显式加载原 JS 配置；保留页面现用色值、边框默认色及未分层覆盖顺序。浏览器最低要求为现代 Chromium、Safari 16.4+、Firefox 128+，不承诺旧浏览器支持；详见 [Tailwind 迁移说明](https://tailwindcss.com/docs/upgrade-guide)。`external-editor` 的 `tmp` 覆盖为0.2.7，保留中文交互式提交；`brace-expansion` 与 `picomatch` 仅覆盖有漏洞的旧版本范围，不降低新主版本。
+旧 Vue CLI 构建链已迁移为 Vite。Tailwind 4 使用独立 PostCSS 插件和 `src/styles/tailwind.css`，显式加载原 JS 配置；保留页面现用色值、边框默认色及未分层覆盖顺序。浏览器最低要求为现代 Chromium、Safari 16.4+、Firefox 128+，不承诺旧浏览器支持；详见 [Tailwind 迁移说明](https://tailwindcss.com/docs/upgrade-guide)。`external-editor` 的 `tmp` 覆盖为0.2.7，保留中文交互式提交；`picomatch`、`minimatch`和`follow-redirects`只覆盖已确认受影响的版本范围；实际lint匹配器/重定向和会话持久化回归随审计一起运行。
 
 Tailwind 使用 `source(none)` 和显式 `@source '../'` 仅扫描 `src`，避免工具文件、父目录及运行数据进入应用样式或拖慢隔离副本的首次编译；新增页面继续放在 `src` 内。构建入口为根 `index.html`，旧 `public/index.ejs` 模板已移除。
 
@@ -201,11 +201,13 @@ Sass 使用 `@use`，组件不再隐式注入整份侧栏CSS；需要共享变�
 
 `npm run lint:check` 在所有环境禁止新增console/debugger及其他lint警告。表单仅消费共享HTTP层已处理的请求失败，未知程序异常继续抛出，不用空catch代替修复。`npm run test:charts`、`test:request-failure`、`test:bundle-budget` 分别覆盖动态图表竞态、失败边界和产物计量。`npm run check:bundle` 读取真实构建文件，超过默认500kB的JavaScript块直接失败；没有调高Vite阈值。可运行 `node scripts/bundle-budget.cjs dist 基线dist目录` 对比原始/gzip字节、初始静态依赖闭包及CSS总量，懒加载块不计入初始闭包；这些是产物指标，不等同于网络延迟或Core Web Vitals。
 
-`npm run audit:dependencies` 分别审计完整依赖和生产依赖，任何级别告警都失败；不能以转移到开发依赖或忽略公告代替修复。兼容回归命令为 `npm run test:build-compat` 和 `npm run test:dependency-security`，覆盖懒路由、ESM中文语言包、SVG/床位图片、真实 CSS 生成与提交工具的临时文件安全。
+`npm run audit:dependencies` 分别审计完整依赖和生产依赖，任何级别告警都失败；不能以转移到开发依赖或忽略公告代替修复。兼容回归命令为 `npm run test:build-compat` 和 `npm run test:dependency-security`，覆盖懒路由、ESM中文语言包、SVG/床位图片、真实 CSS 生成与提交工具的临时文件安全。本地Commitizen适配器为`src`之外的`scripts/commitizen-adapter.cjs`，继续读取`.cz-config.js`中文类型/问题/72字限制，支持确认、取消及外部编辑。编辑失败不会提交，终端给出保留草稿路径，修正编辑器后可恢复；成功后清理临时文件。旧CZ依赖链已移除，安全覆盖保留真实中文编辑、临时目录清理及实际lint模式匹配器/重定向凭据边界。
 
-GitHub Actions 的 `CI` 工作流在 main 推送、面向 main 的 PR（含草稿）及手动触发时运行：数据库迁移/恢复、后端 JDK 8 完整构建和独立 MySQL/Redis 集成、前端 Node 24 全新 `npm ci`与102项业务/依赖/样式/加载契约、完整/生产依赖审计及零警告构建、Python 3.12全依赖/pytest/真实BGE质量门禁，以及33项Chromium端到端回归和 Windows 启停所有权/恢复行为回归。关键的十七组后端集成（含权限、认证、附件、资金/床位并发、告警、RAG租约及实际SQL分页）若缺失或跳过，CI会失败。报告作为artifact保留7天；ESLint warning或产物超预算也会失败。
+登录持久化改由`src/store/persistence.ts`仅保存`stateData.app`协议的已知字段，旧登录/侧栏设置可读取，过滤原型键；没有引入通用深合并。存储损坏/不可写不会抛异常阻断状态更新；服务端仍按JWT和数据范围鉴权。新增`npm run test:care-mobile`执行抽屉导航、失败表单、迟到响应和跨账号请求边界回归。
 
-CI使用临时库和合成凭据，不读取本地 `.env`，不需要GitHub Secrets，不投递真实邮件或调用付费模型。浏览器使用已验证的同一JAR/dist，在全新MySQL/专用Redis验证真实业务页面及数据库写入，并对丢响应、延迟和暂时失败做定向故障注入。失败保留截图、trace、后端日志和JUnit；Vue捕获后输出的console.error也纳入异常门禁。OCR仍按环境执行，Windows Tesseract相关项在Linux跳过。BGE评测仅覆盖当前合成制度语料；除登录/找回密码320px和390px输入回归外，其他移动业务页及其他浏览器需另行验证；完整 Windows/Docker Desktop 一键启动另通过隔离副本验收，不由 Linux 浏览器代理测试代替。
+GitHub Actions 的 `CI` 工作流在 main 推送、面向 main 的 PR（含草稿）及手动触发时运行：数据库迁移/恢复、后端 JDK 8 完整构建和独立 MySQL/Redis 集成、前端 Node 24 全新 `npm ci`与117项业务/依赖/样式/加载/移动会话契约、完整/生产依赖审计及零警告构建、Python 3.12全依赖/pytest/真实BGE质量门禁，以及40项Chromium端到端回归和 Windows 启停所有权/恢复行为回归。关键的十七组后端集成（含权限、认证、附件、资金/床位并发、告警、RAG租约及实际SQL分页）若缺失或跳过，CI会失败。报告作为artifact保留7天；ESLint warning或产物超预算也会失败。
+
+CI使用临时库和合成凭据，不读取本地 `.env`，不需要GitHub Secrets，不投递真实邮件或调用付费模型。浏览器使用已验证的同一JAR/dist，在全新MySQL/专用Redis验证真实业务页面及数据库写入，并对丢响应、延迟和暂时失败做定向故障注入。失败保留截图、trace、后端日志和JUnit；Vue捕获后输出的console.error也纳入异常门禁。OCR仍按环境执行，Windows Tesseract相关项在Linux跳过。BGE评测仅覆盖当前合成制度语料；移动验收覆盖登录/找回密码及护理、健康、用药、每日任务320/390/430px视口，包含真实API写入、失败输入保留和日期弹层；这是Chromium移动视口模拟，不代表实体手机/软键盘或其他浏览器已验收；完整 Windows/Docker Desktop 一键启动另通过隔离副本验收，不由 Linux 浏览器代理测试代替。
 
 Python job启动隔离认证Milvus/MinIO/etcd，强制5项真实索引故障/乱序/集合重建及Linux fork回归；再以实际BGE执行独立服务和随机集合的质量门禁，报告模型SHA、逐题结果及分组延迟，详见 [RAG评测与基线](./源码/beadhouse-ai/README.md)。测试集合和数据卷结束时清理。
 

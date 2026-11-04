@@ -28,3 +28,6 @@ INSERT INTO care_note(elder_id,event_time,source_text,follow_up,status)
 WITH RECURSIVE sequence AS(SELECT 1 AS n UNION ALL SELECT n+1 FROM sequence WHERE n<201)
 SELECT 4,DATE_SUB(NOW(),INTERVAL 3 DAY),'E2E护理来源',
        IF(n=1,'E2E交接任务',CONCAT('E2E分页任务',n)),'PENDING' FROM sequence;
+-- Independent mobile workflows run after desktop checks; no initial alert-producing sources.
+INSERT INTO elder(id,name,id_num,age,sex,phone,address,balance,check_flag,create_id,create_time,update_id,update_time)
+VALUES(867103,'E2E移动护理长姓名','110101195001010005',76,'女','19900003005','移动浏览器合成测试地址：长中文记录核对与触屏操作验收',0,'入住',1,NOW(),1,NOW());

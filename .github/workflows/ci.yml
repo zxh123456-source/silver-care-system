@@ -235,6 +235,8 @@ jobs:
         run: npm run test:notifications
       - name: Verify UI lifecycle, response races and form sessions
         run: npm run test:ui-recovery
+      - name: Verify mobile navigation, care writes and account transitions
+        run: npm run test:care-mobile
       - name: Verify build migration and dependency compatibility
         run: npm run test:build-compat && npm run test:dependency-security
       - name: Verify chart loading, failure boundaries, Sass and bundle accounting

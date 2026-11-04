@@ -16,12 +16,12 @@ export interface HealthMeasurement {
   remarks?: string;
 }
 
-export function addHealthMeasurement(data: HealthMeasurement) {
-  return http.post("/api/ai/health/measurement", data);
+export function addHealthMeasurement(data: HealthMeasurement, session: ResourceSession = captureResourceSession()) {
+  return http.post("/api/ai/health/measurement", data, checkedResourceSessionConfig(session));
 }
 
-export function getHealthTrend(elderId: number, limit = 30) {
-  return http.get("/api/ai/health/trend", { params: { elderId, limit } });
+export function getHealthTrend(elderId: number, limit = 30, session: ResourceSession = captureResourceSession()) {
+  return http.get("/api/ai/health/trend", { ...checkedResourceSessionConfig(session), params: { elderId, limit } });
 }
 
 export function pageSearchHealthElder(data: { pageNum: number; pageSize: number; name?: string; phone?: string }, session: ResourceSession = captureResourceSession()) {

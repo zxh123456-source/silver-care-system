@@ -1,8 +1,7 @@
 <template>
-  <div class="health-page">
+  <div class="health-page care-mobile-page">
     <el-card class="hero" shadow="never">
       <div>
-        <div class="eyebrow">HEALTH TREND</div>
         <h2>健康趋势观察</h2>
         <p>记录日常测量数据，观察连续变化。页面提示仅用于工作人员复核，不构成医疗诊断。</p>
       </div>
@@ -12,26 +11,27 @@
     <div class="grid">
       <el-card shadow="never">
         <template #header><span>日常测量录入</span></template>
-        <el-form label-position="top">
+        <el-form label-position="top" :disabled="saving">
           <el-form-item label="老人">
             <el-input v-model="elderName" readonly placeholder="请选择老人">
               <template #append><el-button @click="openElderDialog">选择</el-button></template>
             </el-input>
           </el-form-item>
           <el-form-item label="测量时间">
-            <el-date-picker v-model="form.measureTime" class="full" type="datetime" value-format="YYYY-MM-DD HH:mm:ss" />
+            <el-date-picker popper-class="care-mobile-picker" v-model="form.measureTime" class="full" type="datetime" value-format="YYYY-MM-DD HH:mm:ss" />
           </el-form-item>
           <el-row :gutter="12">
-            <el-col :span="12"><el-form-item label="体温（℃）"><el-input-number v-model="form.temperature" :precision="1" :step="0.1" :controls="false" /></el-form-item></el-col>
-            <el-col :span="12"><el-form-item label="心率（次/分）"><el-input-number v-model="form.heartRate" :controls="false" /></el-form-item></el-col>
-            <el-col :span="12"><el-form-item label="收缩压（mmHg）"><el-input-number v-model="form.systolicBloodPressure" :controls="false" /></el-form-item></el-col>
-            <el-col :span="12"><el-form-item label="舒张压（mmHg）"><el-input-number v-model="form.diastolicBloodPressure" :controls="false" /></el-form-item></el-col>
-            <el-col :span="12"><el-form-item label="血氧（%）"><el-input-number v-model="form.bloodOxygenSaturation" :controls="false" /></el-form-item></el-col>
-            <el-col :span="12"><el-form-item label="体重（kg）"><el-input-number v-model="form.weight" :precision="1" :step="0.1" :controls="false" /></el-form-item></el-col>
-            <el-col :span="12"><el-form-item label="空腹血糖（mmol/L）"><el-input-number v-model="form.fastingBloodGlucose" :precision="1" :step="0.1" :controls="false" /></el-form-item></el-col>
-            <el-col :span="12"><el-form-item label="餐后血糖（mmol/L）"><el-input-number v-model="form.postprandialBloodGlucose" :precision="1" :step="0.1" :controls="false" /></el-form-item></el-col>
+            <el-col :xs="24" :sm="12"><el-form-item label="体温（℃）"><el-input-number v-model="form.temperature" :precision="1" :step="0.1" :controls="false" /></el-form-item></el-col>
+            <el-col :xs="24" :sm="12"><el-form-item label="心率（次/分）"><el-input-number v-model="form.heartRate" :controls="false" /></el-form-item></el-col>
+            <el-col :xs="24" :sm="12"><el-form-item label="收缩压（mmHg）"><el-input-number v-model="form.systolicBloodPressure" :controls="false" /></el-form-item></el-col>
+            <el-col :xs="24" :sm="12"><el-form-item label="舒张压（mmHg）"><el-input-number v-model="form.diastolicBloodPressure" :controls="false" /></el-form-item></el-col>
+            <el-col :xs="24" :sm="12"><el-form-item label="血氧（%）"><el-input-number v-model="form.bloodOxygenSaturation" :controls="false" /></el-form-item></el-col>
+            <el-col :xs="24" :sm="12"><el-form-item label="体重（kg）"><el-input-number v-model="form.weight" :precision="1" :step="0.1" :controls="false" /></el-form-item></el-col>
+            <el-col :xs="24" :sm="12"><el-form-item label="空腹血糖（mmol/L）"><el-input-number v-model="form.fastingBloodGlucose" :precision="1" :step="0.1" :controls="false" /></el-form-item></el-col>
+            <el-col :xs="24" :sm="12"><el-form-item label="餐后血糖（mmol/L）"><el-input-number v-model="form.postprandialBloodGlucose" :precision="1" :step="0.1" :controls="false" /></el-form-item></el-col>
           </el-row>
           <el-form-item label="备注"><el-input v-model="form.remarks" type="textarea" :rows="2" /></el-form-item>
+          <el-alert v-if="saveError" class="request-error" :title="saveError" type="error" :closable="false" show-icon />
           <el-button type="primary" :loading="saving" @click="saveMeasurement">保存测量</el-button>
         </el-form>
       </el-card>
@@ -43,8 +43,12 @@
             <el-option v-for="item in metrics" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
         </template>
-        <el-empty v-if="!trend?.records?.length" description="选择老人并录入测量后查看趋势" />
-        <template v-else>
+        <el-alert v-if="trendError" class="request-error" :title="trendError" type="error" :closable="false" show-icon>
+          <el-button :loading="trendLoading" @click="loadTrend">重新加载</el-button>
+        </el-alert>
+        <el-skeleton v-if="trendLoading && !trend" :rows="6" animated />
+        <el-empty v-else-if="!trend?.records?.length && !trendError" description="选择老人并录入测量后查看趋势" />
+        <template v-if="trend?.records?.length">
           <div ref="chartRef" class="chart"></div>
           <el-alert :title="trend.summary" type="info" :closable="false" show-icon />
           <div v-if="trend.changeReminders.length" class="reminders">
@@ -53,7 +57,7 @@
         </template>
       </el-card>
     </div>
-    <elder-list-dialog ref="elderDialogRef" @get-check-elder-info="selectElder" />
+    <elder-list-dialog class="care-mobile-dialog care-elder-picker" ref="elderDialogRef" @get-check-elder-info="selectElder" />
   </div>
 </template>
 
@@ -65,6 +69,7 @@ import { nextTick, onUnmounted, ref } from "vue";
 import elderListDialog from "@/components/elderListDialog/index.vue";
 import { addHealthMeasurement, getHealthTrend } from "@/apis/aiHealth";
 import { pageAccessibleElders } from "@/apis/aiScope";
+import { useCarePageSession } from "@/views/ai/care/useCarePageSession";
 
 const pad = (value: number) => String(value).padStart(2, "0");
 const formatNow = () => {
@@ -83,6 +88,17 @@ let chart: ECharts | null = null;
 let chartObserver: ResizeObserver | null = null;
 let alive = true;
 const metric = ref("temperature");
+const trendLoading = ref(false);
+const trendError = ref("");
+const saveError = ref("");
+let trendRequest = 0;
+function disposeChart() {
+  chartObserver?.disconnect(); chartObserver = null; chart?.dispose(); chart = null;
+}
+const pageSession = useCarePageSession(() => {
+  form.value = emptyForm(); elderName.value = ""; trend.value = null;
+  trendError.value = saveError.value = ""; disposeChart();
+});
 const metrics = [
   { value: "temperature", label: "体温（℃）" },
   { value: "heartRate", label: "心率（次/分）" },
@@ -95,10 +111,11 @@ const metrics = [
 ];
 
 function openElderDialog() {
-  elderDialogRef.value?.elderAcceptParams({ elderApi: pageAccessibleElders });
+  elderDialogRef.value?.elderAcceptParams({ elderApi: pageAccessibleElders, fixedOperation: true });
 }
 
 async function selectElder(row: any) {
+  trend.value = null; disposeChart();
   form.value.elderId = row.id;
   elderName.value = row.name;
   await loadTrend();
@@ -114,20 +131,24 @@ function isExpectedRequestFailure(error: unknown): error is { code?: number; msg
 async function saveMeasurement() {
   if (saving.value) return;
   if (!form.value.elderId) return ElMessage.warning("请先选择老人");
-  saving.value = true;
+  const session = pageSession.capture();
+  const elderId = form.value.elderId;
+  saving.value = true; saveError.value = "";
   let saved = false;
   try {
-    const res: any = await addHealthMeasurement(form.value);
-    if (res.code !== 200) return ElMessage.warning(res.msg || "保存失败");
+    const res: any = await addHealthMeasurement({ ...form.value }, session);
+    if (!pageSession.current(session) || elderId !== form.value.elderId) return;
+    if (res.code !== 200) throw res;
     saved = true;
     ElMessage.success("健康测量已保存");
-    const elderId = form.value.elderId;
     form.value = { ...emptyForm(), elderId };
     await loadTrend();
+    if (trendError.value) trendError.value = "测量已保存，趋势暂未刷新，请重新加载。";
   } catch (error) {
+    if (!pageSession.current(session)) return;
     if (!isExpectedRequestFailure(error)) throw error;
-    ElMessage.warning(saved ? '测量已保存，趋势暂未刷新，请重新查看'
-      : error.msg || '未确认保存结果，请先核对健康趋势后再重试');
+    saveError.value = saved ? "测量已保存，趋势暂未刷新，请重新加载。"
+      : "保存结果未确认，输入已保留，请先重新加载趋势核对后再重试。";
   } finally {
     saving.value = false;
   }
@@ -135,18 +156,22 @@ async function saveMeasurement() {
 
 async function loadTrend() {
   if (!form.value.elderId) return;
-  const res: any = await getHealthTrend(form.value.elderId);
-  if (!alive) return;
-  trend.value = res.data;
-  if (!trend.value?.records?.length) {
-    chartObserver?.disconnect();
-    chartObserver = null;
-    chart?.dispose();
-    chart = null;
-    return;
-  }
-  await nextTick();
-  await renderChart();
+  const session = pageSession.capture();
+  const request = ++trendRequest;
+  trendLoading.value = true; trendError.value = "";
+  try {
+    const res: any = await getHealthTrend(form.value.elderId, 30, session);
+    if (!alive || !pageSession.current(session) || request !== trendRequest) return;
+    if (res.code !== 200) throw res;
+    trend.value = res.data;
+    if (!trend.value?.records?.length) { disposeChart(); return; }
+    await nextTick();
+    await renderChart();
+  } catch (error) {
+    if (!alive || !pageSession.current(session) || request !== trendRequest) return;
+    if (!isExpectedRequestFailure(error)) throw error;
+    trendError.value = "健康趋势暂未加载，请重新加载。";
+  } finally { if (request === trendRequest) trendLoading.value = false; }
 }
 
 async function renderChart() {
@@ -162,7 +187,7 @@ async function renderChart() {
     try {
       echarts = await import("@/utils/charts");
     } catch {
-      if (alive) ElMessage.warning("趋势图暂未加载，请稍后重试");
+      if (alive) { trendError.value = "趋势图暂未加载，请重新加载。"; ElMessage.warning("趋势图暂未加载，请稍后重试"); }
       return;
     }
     if (!alive || chartRef.value !== element || !trend.value?.records?.length) return;
@@ -189,10 +214,9 @@ onUnmounted(() => { alive = false; window.removeEventListener("resize", resize);
 <style lang="scss" scoped>
 .health-page { padding: 4px; }
 .hero { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; background: linear-gradient(120deg, #eff6ff, #f8fbff); }
-.eyebrow { color: #409eff; font-size: 12px; letter-spacing: 1.5px; }
 h2 { margin: 6px 0; color: #1f2937; }
 p { margin: 0; color: #6b7280; }
-.grid { display: grid; grid-template-columns: 420px 1fr; gap: 16px; }
+.grid { display: grid; grid-template-columns: 420px minmax(0, 1fr); gap: 16px; }
 .full { width: 100%; }
 .health-page :deep(.el-input-number) { width: 100%; }
 .metric-select { width: 180px; float: right; }

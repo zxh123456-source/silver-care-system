@@ -2,19 +2,26 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
-const { createRequire } = require('node:module');
+const { createRequire, Module } = require('node:module');
 const { spawnSync } = require('node:child_process');
 
 const frontend = path.resolve(__dirname, '..');
 const dependencyRequire = process.env.FRONTEND_TEST_DEPENDENCIES
   ? createRequire(path.resolve(process.env.FRONTEND_TEST_DEPENDENCIES, 'package.json')) : require;
 const postcss = dependencyRequire('postcss');
-const czRequire = createRequire(dependencyRequire.resolve('cz-customizable'));
-const inquirer = czRequire('inquirer');
-const inquirerRequire = createRequire(czRequire.resolve('inquirer'));
-const externalRequire = createRequire(inquirerRequire.resolve('external-editor'));
-const { ExternalEditor } = inquirerRequire('external-editor');
+const externalRequire = createRequire(dependencyRequire.resolve('external-editor'));
+const { ExternalEditor } = dependencyRequire('external-editor');
 const tmp = externalRequire('tmp');
+
+function commitAdapter() {
+  const filename = path.join(__dirname, 'commitizen-adapter.cjs');
+  const adapter = new Module(filename, module);
+  adapter.filename = filename;
+  const localRequire = createRequire(filename);
+  adapter.require = name => name === 'external-editor' ? dependencyRequire(name) : localRequire(name);
+  adapter._compile(fs.readFileSync(filename, 'utf8'), filename);
+  return adapter.exports;
+}
 
 test('patched picomatch preserves source globs without inheriting POSIX class methods', () => {
   const componentRequire = createRequire(dependencyRequire.resolve('unplugin-vue-components'));
@@ -31,19 +38,22 @@ test('patched picomatch preserves source globs without inheriting POSIX class me
   }
 });
 
-test('patched legacy brace expansion preserves numeric/list patterns and terminates zero-step sequences', () => {
-  const expand = dependencyRequire('brace-expansion');
+test('the active lint brace expansion preserves numeric/list patterns and terminates zero-step sequences', () => {
+  const eslintRequire = createRequire(dependencyRequire.resolve('eslint'));
+  const expand = eslintRequire('minimatch').braceExpand;
   assert.deepEqual(expand('care-{01..03}.{vue,ts}'), ['care-01.vue', 'care-01.ts', 'care-02.vue',
     'care-02.ts', 'care-03.vue', 'care-03.ts']);
   // Bound both time and heap so this regression cannot hang or exhaust the test runner on an old lockfile.
   const result = spawnSync(process.execPath, ['--max-old-space-size=64', '-e',
-    'process.stdout.write(JSON.stringify(require(process.argv[1])("{1..2..0}")))',
-    dependencyRequire.resolve('brace-expansion')], { encoding: 'utf8', timeout: 2000, windowsHide: true });
+    'process.stdout.write(JSON.stringify(require(process.argv[1]).braceExpand("{1..2..0}")))',
+    eslintRequire.resolve('minimatch')], { encoding: 'utf8', timeout: 2000, windowsHide: true });
   assert.equal(result.status, 0, `Zero-step expansion must finish safely (${result.error?.code || result.signal || result.status})`);
   assert.deepEqual(JSON.parse(result.stdout), ['1', '2']);
-  const version = dependencyRequire('brace-expansion/package.json').version.split('.').map(Number);
-  assert.ok(version[0] === 1 && (version[1] > 1 || version[1] === 1 && version[2] >= 21),
-    `Legacy glob must use the patched brace-expansion 1.1.21+ line: ${version.join('.')}`);
+  const lock = JSON.parse(fs.readFileSync(path.join(frontend, 'package-lock.json'), 'utf8'));
+  assert.ok(!Object.entries(lock.packages).some(([name, pkg]) =>
+    /node_modules\/(?:cz-customizable|temp|glob)$/.test(name)
+      || /node_modules\/brace-expansion$/.test(name) && pkg.version.startsWith('1.')),
+    'The obsolete commit adapter must not retain its legacy glob/brace-expansion chain');
 });
 
 test('the real Tailwind 4 entry preserves project colors, variants, nesting and important declarations', async () => {
@@ -161,41 +171,74 @@ test('the tmp instance used by external-editor rejects prefix/postfix directory 
     `external-editor must resolve tmp 0.2.6+: ${version.join('.')}`);
 });
 
-test('the real cz-customizable prompter retains Chinese questions, limits, skip rules and commit/cancel behavior', async () => {
-  const adapter = dependencyRequire('cz-customizable');
-  const originalPrompt = inquirer.prompt;
+test('the real Commitizen prompter retains Chinese questions, limits, skip rules and commit/cancel behavior', async () => {
+  const adapter = commitAdapter();
   const originalCwd = process.cwd();
   const commits = [];
   let questions;
   let confirmation = 'yes';
-  inquirer.prompt = current => {
+  const inquirer = { prompt: current => {
     questions = current;
     return Promise.resolve({ type: 'feat', scope: '依赖', subject: '修复依赖安全告警', confirmCommit: confirmation });
-  };
+  } };
   try {
     process.chdir(frontend);
-    adapter.prompter(inquirer, message => commits.push(message));
-    await new Promise(resolve => setImmediate(resolve));
+    await adapter.prompter(inquirer, message => commits.push(message));
     assert.deepEqual(commits, ['feat(依赖): 修复依赖安全告警']);
     assert.equal(questions.find(question => question.name === 'type').message, '请选择提交类型:');
     assert.ok(questions.find(question => question.name === 'type').choices.some(choice =>
       choice.value === 'feat' && choice.name.includes('新功能')));
+    assert.deepEqual(questions.find(question => question.name === 'type').choices,
+      require('../.cz-config.js').types);
     assert.equal(questions.find(question => question.name === 'scope' && question.type === 'input').message,
       '请输入修改范围(可选):');
     const subject = questions.find(question => question.name === 'subject');
     assert.equal(subject.message, '请简要描述提交(必填):');
     assert.equal(subject.validate('中'.repeat(72)), true);
     assert.notEqual(subject.validate('中'.repeat(73)), true);
+    assert.notEqual(subject.validate(''), true);
     assert.ok(!questions.some(question => ['body', 'footer'].includes(question.name)));
+    const confirmationQuestion = questions.find(question => question.name === 'confirmCommit');
+    assert.equal(confirmationQuestion.type, 'expand', 'The standard expand prompt retains h/help');
+    assert.deepEqual(confirmationQuestion.choices.map(choice => choice.key), ['y', 'n', 'e']);
     assert.equal(questions.find(question => question.name === 'confirmCommit').message({
       type: 'feat', scope: '依赖', subject: '修复依赖安全告警'
     }), '确认使用以上信息提交？(y/n/e/h)');
     confirmation = 'no';
-    adapter.prompter(inquirer, message => commits.push(message));
-    await new Promise(resolve => setImmediate(resolve));
+    await adapter.prompter(inquirer, message => commits.push(message));
     assert.equal(commits.length, 1, 'Cancel must not invoke the commit callback');
   } finally {
-    inquirer.prompt = originalPrompt;
     process.chdir(originalCwd);
+  }
+});
+
+test('the real Commitizen adapter edits UTF-8 drafts, cleans success and preserves failed edits without committing', async () => {
+  const adapter = commitAdapter();
+  const originalLaunch = ExternalEditor.prototype.launchEditor;
+  const originalError = console.error;
+  const commits = [], errors = [], paths = [];
+  const edited = 'fix(依赖): 保留中文编辑内容\n\n多行说明';
+  const cz = { prompt: async () => ({ type: 'fix', scope: '依赖', subject: '初始说明', confirmCommit: 'edit' }) };
+  let exitStatus = 0;
+  ExternalEditor.prototype.launchEditor = function () {
+    paths.push(this.tempFile);
+    assert.equal(fs.readFileSync(this.tempFile, 'utf8'), 'fix(依赖): 初始说明');
+    fs.writeFileSync(this.tempFile, edited, 'utf8');
+    this.lastExitStatus = exitStatus;
+  };
+  console.error = text => errors.push(text);
+  try {
+    await adapter.prompter(cz, text => commits.push(text));
+    assert.deepEqual(commits, [edited]);
+    assert.equal(fs.existsSync(paths[0]), false);
+    exitStatus = 1;
+    await adapter.prompter(cz, text => commits.push(text));
+    assert.equal(commits.length, 1, 'A failed editor must never commit');
+    assert.equal(fs.readFileSync(paths[1], 'utf8'), edited, 'The failed edit must remain recoverable');
+    assert.ok(errors[0].includes(paths[1]), 'The recovery path must be shown');
+  } finally {
+    ExternalEditor.prototype.launchEditor = originalLaunch;
+    console.error = originalError;
+    for (const filename of paths) if (fs.existsSync(filename)) fs.unlinkSync(filename);
   }
 });

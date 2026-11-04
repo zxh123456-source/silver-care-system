@@ -70,6 +70,15 @@ function fixture(name, request, pendingLibrary) {
     axios: require('axios'), '@/components/elderListDialog/index.vue': {}, '@/apis/aiScope': {},
     '@/apis/home': { getBusinessTrend: request }, '@/apis/aiHealth': { getHealthTrend: request }
   };
+  // Session identity is a chart-test boundary; run the real lifecycle helper.
+  dependencies['@/store'] = { __esModule: true, default: { state: vue.reactive({ app: { token: 'chart-session', userPeofile: { userid: 7 } } }) } };
+  dependencies['@/utils/authResource'] = { captureResourceSession: () => ({ token: 'chart-session', staffId: '7' }), isResourceSessionCurrent: () => true };
+  const sessionFile = path.join(root, 'src/views/ai/care/useCarePageSession.ts');
+  const sessionModule = { exports: {} };
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync(sessionFile, 'utf8'), { compilerOptions: {
+    module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true
+  } }).outputText, { module: sessionModule, exports: sessionModule.exports, window, require: key => dependencies[key] }, { filename: sessionFile });
+  dependencies['@/views/ai/care/useCarePageSession'] = sessionModule.exports;
   const filename = path.join(root, 'src/views', name === 'home' ? 'home/trend.vue' : 'ai/health/index.vue');
   const descriptor = parse(fs.readFileSync(filename, 'utf8')).descriptor;
   const exposed = name === 'home' ? 'Echarts,loadError' : 'form,trend,metric,chartRef,loadTrend,renderChart';

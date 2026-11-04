@@ -13,12 +13,13 @@
         :default-active="active"
         text-color="#ffffff"
         unique-opened
-        :collapse="!$store.state.app.siderType"
+        :collapse="!mobile && !$store.state.app.siderType"
+        @select="emit('navigate')"
       >
         <MenuItem :menuList="store.state.app.routeTree" />
       </el-menu>
     </el-scrollbar>
-    <div class="menufold-container">
+    <div v-if="!mobile" class="menufold-container">
       <MenuFold />
     </div>
   </div>
@@ -31,6 +32,9 @@ import variables from '@/styles/variables.module.scss'
 import { ref, watch } from 'vue'
 import { RouteRecordName, useRoute } from 'vue-router'
 import store from '@/store'
+
+defineProps<{ mobile?: boolean }>()
+const emit = defineEmits<{ (event: 'navigate'): void }>()
 
 const route = useRoute()
 

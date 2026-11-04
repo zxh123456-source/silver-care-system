@@ -1,14 +1,17 @@
 <template>
   <el-container
     class="layout-container"
-    :class="{ hideSidebar: !$store.state.app.siderType }"
+    :class="{ hideSidebar: !isMobile && !$store.state.app.siderType, 'mobile-layout': isMobile }"
   >
-    <el-aside :width="$store.state.app.siderType ? '230px' : '64px'">
+    <el-aside v-if="!isMobile" :width="$store.state.app.siderType ? '230px' : '64px'">
       <SideBar />
     </el-aside>
+    <el-drawer v-if="isMobile" v-model="navigationOpen" class="mobile-navigation" title="页面导航" direction="ltr" size="min(280px, calc(100vw - 44px))">
+      <SideBar mobile @navigate="closeNavigation" />
+    </el-drawer>
     <el-container class="main-container">
       <el-header>
-        <NavBar />
+        <NavBar :mobile="isMobile" :navigation-open="navigationOpen" @open-navigation="navigationOpen = true" />
       </el-header>
       <el-main>
         <el-scrollbar>
@@ -29,24 +32,9 @@
 import SideBar from './components/SideBar/index.vue'
 import NavBar from './components/NavBar/index.vue'
 
-// window.onresize = () =>
-//   (() => {
-//     /** width app-wrapper类容器宽度
-//      * 0 < width <= 760 隐藏侧边栏
-//      * 760 < width <= 990 折叠侧边栏
-//      * width > 990 展开侧边栏
-//      */
+import { useMobileNavigation } from './useMobileNavigation'
 
-//     let width = document.body.clientWidth
-
-//     if (width > 0 && width <= 760) { // 隐藏侧边栏
-//       store.commit('app/setDeviceType', 'phone')
-//     } else if (width > 760 && width <= 990) { // 折叠侧边栏
-//       store.commit('app/setDeviceType', 'ipaid')
-//     } else if (width > 990) { // 展开侧边栏
-//       store.commit('app/setDeviceType', 'desktop')
-//     }
-//   })()
+const { isMobile, navigationOpen, closeNavigation } = useMobileNavigation()
 </script>
 
 <style lang="scss" scoped>

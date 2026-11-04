@@ -16,12 +16,19 @@
         <!-- 表格操作 -->
         <template #operation="scope">
           <el-popconfirm
-            title="Are you sure to choose this?"
+            :title="drawerProps?.fixedOperation ? '确认选择该老人？' : 'Are you sure to choose this?'"
+            :width="drawerProps?.fixedOperation ? 220 : undefined"
             @confirm="checkElder(scope.row)"
             confirm-button-type="warning"
           >
             <template #reference>
-              <el-button size="small" link :icon="View" > 选择 </el-button>
+              <el-button size="small" link :icon="drawerProps?.fixedOperation ? undefined : View" > 选择 </el-button>
+            </template>
+            <template v-if="drawerProps?.fixedOperation" #actions="{ confirm, cancel }">
+              <div class="care-elder-confirm-actions">
+                <el-button size="small" text @click="cancel">取消</el-button>
+                <el-button size="small" type="warning" @click="confirm">确认选择</el-button>
+              </div>
             </template>
           </el-popconfirm>
         </template>
@@ -31,7 +38,7 @@
 </template>
 
 <script setup lang="ts" name="useProTable">
-import { ref, watch, onBeforeUnmount } from "vue";
+import { computed, ref, watch, onBeforeUnmount } from "vue";
 import store from "@/store";
 import { captureResourceSession, isResourceSessionCurrent } from "@/utils/authResource";
 import type { ResourceSession } from "@/utils/authResource";
@@ -47,6 +54,7 @@ const drawerProps = ref<DialogProps>();
 
 interface DialogProps {
   elderApi: (params: any, session?: ResourceSession) => Promise<any>;
+  fixedOperation?: boolean;
 }
 
 const dialogScope = createAsyncScope(isResourceSessionCurrent);
@@ -91,16 +99,16 @@ const getTableList = async (params: any) => {
 };
 
 // 表格配置项
-const columns: ColumnProps<any>[] = [
+const columns = computed<ColumnProps<any>[]>(() => [
   { prop: "rank", label: "序号", width: 55 },
-  { prop: "name", label: "姓名", search: { el: "input" } },
+  { prop: "name", label: "姓名", className: "elder-name-cell", search: { el: "input" } },
   { prop: "idNum", label: "身份证号" },
   { prop: "sex", label: "性别" },
   { prop: "age", label: "年龄" },
   { prop: "phone", label: "电话", search: { el: "input" } },
   { prop: "address", label: "地址" },
-  { prop: "operation", label: "操作", width: 70 }
-];
+  { prop: "operation", label: "操作", width: drawerProps.value?.fixedOperation ? 88 : 70, fixed: drawerProps.value?.fixedOperation ? "right" : undefined }
+]);
 
 const elderAcceptParams = (params: DialogProps) => {
   clearDialogIntent();

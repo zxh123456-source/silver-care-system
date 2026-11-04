@@ -17,6 +17,8 @@ from pathlib import Path
 
 from playwright.sync_api import expect, sync_playwright
 
+from mobile_care import run_mobile_care
+
 
 def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list[str]:
     entry_script = re.search(r'<script\b[^>]*\bsrc="([^"]+)"', (dist / "index.html").read_text(encoding="utf-8"))
@@ -787,6 +789,18 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
                 admin.screenshot(path=str(evidence / "admin.png"))
                 staff.screenshot(path=str(evidence / "staff.png"))
                 record("no browser JavaScript or caught Vue console exceptions")
+                # A new login replaces this account's server token. Retire the
+                # completed desktop pages before mobile login so their 45-second
+                # notification poll cannot test an intentionally superseded session.
+                for _, completed_context in contexts:
+                    completed_context.tracing.stop()
+                    completed_context.close()
+                contexts.clear()
+                run_mobile_care(new_page=new_page, login_admin=lambda page: login(page, "13547584400", next_password),
+                                route=route, click_api=click_api, select_option=select_option,
+                                allow_console_once=allow_console_once, record=record, evidence=evidence)
+                assert not errors, errors
+                assert not [item for item in expected_console_errors if item[0] == "mobile-care"]
                 failed = False
                 return checks
             finally:
