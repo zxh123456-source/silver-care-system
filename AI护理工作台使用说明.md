@@ -76,7 +76,7 @@ AI_PROVIDER_TIMEOUT_MS=8000
 
 制度上传支持 txt、md、pdf、docx 和扫描图片。文本按段落切片后进入 FastAPI 检索服务；扫描 PDF 先读取文字层，必要时按页调用 Tesseract OCR，不会把空识别结果导入知识库。页面上的“扫描 OCR”状态会说明引擎和语言数据是否就绪。默认语言为 `chi_sim+eng`，首次准备中文语言数据可运行项目根目录的 `配置中文OCR.ps1`；也可以通过 `AI_OCR_COMMAND`、`AI_OCR_LANGUAGE`、`AI_OCR_DATA_DIR`、`AI_OCR_TIMEOUT_MS`、`AI_OCR_DOCUMENT_TIMEOUT_MS` 调整。未安装 Tesseract 或缺少语言包时，普通文本 PDF 仍可导入，扫描文件会返回明确的配置提示。
 
-制度检索已经拆分为 FastAPI 服务 `源码/beadhouse-ai`。默认启用本地 BM25 + `BAAI/bge-small-zh-v1.5` 中文语义向量 + RRF 混合检索，监听 `127.0.0.1:8001`；Spring Boot 会在 MySQL 事务提交后同步索引，并通过 `policy_rag_sync` 自动重试。FastAPI 停机、超时或返回失效片段时，Spring 会在约 2 秒内回退本地关键词检索。制度管理页面会显示每份文档的索引同步状态。
+制度检索已经拆分为 FastAPI 服务 `源码/beadhouse-ai`。默认启用本地 BM25 + `BAAI/bge-small-zh-v1.5` 中文语义向量 + RRF 混合检索，监听 `127.0.0.1:8001`；Spring Boot 会在 MySQL 事务提交后同步索引，并通过 `policy_rag_sync` 自动重试。FastAPI 停机、超时或返回失效片段时，Spring 会在约 2 秒内回退本地关键词检索。制度管理页面会显示每份文档的索引同步状态。目录还会提示与其他来源正文完全相同的制度数量；按完整有序片段比较，保留数字、内部空白和段落边界，仅规范换行/段尾空白。提示用于核对来源与版本，不会自动合并、删除或判断制度失效。
 
 一键启动脚本会在 Docker 可用时启动 Milvus 2.6.24，并将 `RAG_BACKEND` 自动设置为 `milvus`；当前默认使用 Milvus 中文 BM25 + `BAAI/bge-small-zh-v1.5` dense + RRF 混合检索，Milvus 不可用时回退本地 BM25 + 关键词检索。Spring 会校验返回的片段 ID 后再生成引用，FastAPI 会拦截提示注入问题。当前机器已完成真实 Milvus 检索评测。
 

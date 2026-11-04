@@ -412,3 +412,4 @@ def run_mobile_care(*, new_page, login_admin, route, click_api, select_option,
                 page.keyboard.press("Escape")
             expect(calendar).not_to_be_visible()
     record("mobile date and datetime popovers fit all four care pages at 320px, 390px and 430px")
+    return page

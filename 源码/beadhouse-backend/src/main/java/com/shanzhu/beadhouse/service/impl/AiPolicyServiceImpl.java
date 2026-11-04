@@ -31,6 +31,9 @@ import org.springframework.transaction.annotation.Isolation;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.annotation.Resource;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -153,6 +156,7 @@ public class AiPolicyServiceImpl implements AiPolicyService {
     public Result listDocuments() {
         List<PolicyDoc> docs = policyDocMapper.selectList(new QueryWrapper<PolicyDoc>().orderByAsc("title", "section_no"));
         Map<String, PolicyCatalogVo> catalog = new LinkedHashMap<>();
+        Map<String, List<PolicyDoc>> documentChunks = new HashMap<>();
         for (PolicyDoc doc : docs) {
             String key = doc.getTitle() + "\u0000" + doc.getSource();
             PolicyCatalogVo item = catalog.get(key);
@@ -162,16 +166,49 @@ public class AiPolicyServiceImpl implements AiPolicyService {
                 item.setSource(doc.getSource());
                 item.setSectionCount(0);
                 catalog.put(key, item);
+                documentChunks.put(key, new ArrayList<>());
             }
             item.setSectionCount(item.getSectionCount() + 1);
+            documentChunks.get(key).add(doc);
+        }
+        Map<String, Integer> hashCounts = new HashMap<>();
+        for (Map.Entry<String, PolicyCatalogVo> entry : catalog.entrySet()) {
+            String hash = contentHash(documentChunks.get(entry.getKey()));
+            entry.getValue().setContentHash(hash);
+            hashCounts.put(hash, hashCounts.getOrDefault(hash, 0) + 1);
         }
         for (PolicyCatalogVo item : catalog.values()) {
+            item.setDuplicateCount(hashCounts.get(item.getContentHash()) - 1);
             PolicyRagSync sync = ragSyncService.find(ragSyncService.documentKey(item.getTitle(), item.getSource()));
             item.setRagStatus(sync == null ? "NOT_SYNCED" : sync.getStatus());
             item.setRagAttemptCount(sync == null ? 0 : sync.getAttemptCount());
             item.setRagLastErrorCode(sync == null ? null : sync.getLastErrorCode());
         }
         return Result.success(new ArrayList<>(catalog.values()));
+    }
+
+    private String contentHash(List<PolicyDoc> chunks) {
+        chunks.sort(Comparator.comparing(PolicyDoc::getSectionNo, Comparator.nullsLast(Comparator.naturalOrder())));
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            for (PolicyDoc chunk : chunks) {
+                // Keep interior whitespace and chunk boundaries; normalize only CRLF and trailing whitespace.
+                String text = nullToEmpty(chunk.getContent()).replace("\r\n", "\n");
+                int end = text.length();
+                while (end > 0 && Character.isWhitespace(text.charAt(end - 1))) end--;
+                byte[] bytes = text.substring(0, end).getBytes(StandardCharsets.UTF_8);
+                for (int shift = 24; shift >= 0; shift -= 8) digest.update((byte) (bytes.length >>> shift));
+                digest.update(bytes);
+            }
+            StringBuilder hash = new StringBuilder(64);
+            for (byte value : digest.digest()) {
+                hash.append(Character.forDigit((value >>> 4) & 15, 16));
+                hash.append(Character.forDigit(value & 15, 16));
+            }
+            return hash.toString();
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
     }
 
     @Override

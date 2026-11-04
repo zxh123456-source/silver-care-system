@@ -227,7 +227,7 @@ Sass 使用 `@use`，组件不再隐式注入整份侧栏CSS；需要共享变�
 
 登录持久化改由`src/store/persistence.ts`仅保存`stateData.app`协议的已知字段，旧登录/侧栏设置可读取，过滤原型键；没有引入通用深合并。存储损坏/不可写不会抛异常阻断状态更新；服务端仍按JWT和数据范围鉴权。新增`npm run test:care-mobile`执行抽屉导航、失败表单、迟到响应和跨账号请求边界回归。
 
-GitHub Actions 的 `CI` 工作流在 main 推送、面向 main 的 PR（含草稿）及手动触发时运行：数据库迁移/恢复、后端 JDK 8 完整构建和独立 MySQL/Redis 集成、前端 Node 24 全新 `npm ci`与117项业务/依赖/样式/加载/移动会话契约、完整/生产依赖审计及零警告构建、Python 3.12全依赖/pytest/真实BGE质量门禁，以及40项Chromium端到端回归和 Windows 启停所有权/恢复行为回归。关键的十七组后端集成（含权限、认证、附件、资金/床位并发、告警、RAG租约及实际SQL分页）若缺失或跳过，CI会失败。报告作为artifact保留7天；ESLint warning或产物超预算也会失败。
+GitHub Actions 的 `CI` 工作流在 main 推送、面向 main 的 PR（含草稿）及手动触发时运行：数据库迁移/恢复、后端 JDK 8 完整构建和独立 MySQL/Redis 集成、前端 Node 24 全新 `npm ci`与117项业务/依赖/样式/加载/移动会话契约、完整/生产依赖审计及零警告构建、Python 3.12全依赖/pytest/真实BGE质量门禁，以及41项Chromium端到端回归和 Windows 启停所有权/恢复行为回归。关键的十七组后端集成（含权限、认证、附件、资金/床位并发、告警、RAG租约及实际SQL分页）若缺失或跳过，CI会失败。报告作为artifact保留7天；ESLint warning或产物超预算也会失败。
 
 CI使用临时库和合成凭据，不读取本地 `.env`，不需要GitHub Secrets，不投递真实邮件或调用付费模型。浏览器使用已验证的同一JAR/dist，在全新MySQL/专用Redis验证真实业务页面及数据库写入，并对丢响应、延迟和暂时失败做定向故障注入。失败保留截图、trace、后端日志和JUnit；Vue捕获后输出的console.error也纳入异常门禁。OCR仍按环境执行，Windows Tesseract相关项在Linux跳过。BGE评测仅覆盖当前合成制度语料；移动验收覆盖登录/找回密码及护理、健康、用药、每日任务320/390/430px视口，包含真实API写入、失败输入保留和日期弹层；这是Chromium移动视口模拟，不代表实体手机/软键盘或其他浏览器已验收；完整 Windows/Docker Desktop 一键启动另通过隔离副本验收，不由 Linux 浏览器代理测试代替。
 

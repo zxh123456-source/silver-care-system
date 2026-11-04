@@ -796,9 +796,31 @@ def run_browser(dist: Path, backend: str, password: str, evidence: Path) -> list
                     completed_context.tracing.stop()
                     completed_context.close()
                 contexts.clear()
-                run_mobile_care(new_page=new_page, login_admin=lambda page: login(page, "13547584400", next_password),
+                mobile_page = run_mobile_care(new_page=new_page, login_admin=lambda page: login(page, "13547584400", next_password),
                                 route=route, click_api=click_api, select_option=select_option,
                                 allow_console_once=allow_console_once, record=record, evidence=evidence)
+                mobile_page.set_viewport_size({"width": 1600, "height": 1000})
+                route(mobile_page, "/ai-care/policy", "院内制度知识库")
+                first_title, second_title = "E2E相同正文甲", "E2E相同正文乙"
+                def import_catalog(title, source, text):
+                    mobile_page.get_by_placeholder("例如：老人跌倒处理流程", exact=True).fill(title)
+                    mobile_page.get_by_placeholder("例如：护理部制度汇编 2026", exact=True).fill(source)
+                    mobile_page.get_by_placeholder("按段落粘贴制度正文，空行会分成检索片段", exact=True).fill(text)
+                    import_button = mobile_page.get_by_role("button", name="导入知识库", exact=True)
+                    click_api(mobile_page, import_button, "/api/ai/policy/import")
+                    expect(import_button).not_to_have_class(re.compile(r"\bis-loading\b"))
+                    expect(mobile_page.locator(".catalog-item").filter(has_text=title)).to_be_visible()
+                import_catalog(first_title, "E2E来源甲", "交班前核对 2 项记录。\n\n原始记录应保持完整。")
+                import_catalog(second_title, "E2E来源乙", "交班前核对 2 项记录。\n\n原始记录应保持完整。")
+                first_catalog = mobile_page.locator(".catalog-item").filter(has_text=first_title)
+                second_catalog = mobile_page.locator(".catalog-item").filter(has_text=second_title)
+                expect(first_catalog.locator(".duplicate-note")).to_contain_text("另外 1 份")
+                expect(second_catalog.locator(".duplicate-note")).to_contain_text("另外 1 份")
+                mobile_page.screenshot(path=str(evidence / "policy-duplicates.png"), full_page=True)
+                import_catalog(second_title, "E2E来源乙", "交班前核对 12 项记录。\n\n原始记录应保持完整。")
+                expect(first_catalog.locator(".duplicate-note")).to_have_count(0)
+                expect(second_catalog.locator(".duplicate-note")).to_have_count(0)
+                record("policy catalog identifies identical complete content across sources and clears it after a real update")
                 assert not errors, errors
                 assert not [item for item in expected_console_errors if item[0] == "mobile-care"]
                 failed = False

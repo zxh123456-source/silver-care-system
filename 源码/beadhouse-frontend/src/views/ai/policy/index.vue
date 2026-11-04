@@ -42,6 +42,7 @@
           <div>
             <b>{{ item.title }}</b>
             <small>{{ item.source }} · {{ item.sectionCount }} 个片段</small>
+            <small v-if="item.duplicateCount > 0" class="duplicate-note">与另外 {{ item.duplicateCount }} 份制度正文相同，请核对来源与版本。</small>
             <el-tag class="sync-tag" size="small" :type="syncTagType(item.ragStatus)">索引 {{ syncText(item.ragStatus) }}</el-tag>
           </div>
           <el-button size="small" type="danger" link @click="handleDelete(item)">删除</el-button>
@@ -198,6 +199,7 @@ p { margin: 0; color: #6b7280; }
 .ocr-tip { margin-top: 12px; }
 .catalog-item { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 9px 0; border-bottom: 1px solid #f3f4f6; }
 .catalog-item small { display: block; margin-top: 3px; color: #6b7280; }
+.catalog-item .duplicate-note { color: #854d0e; line-height: 1.6; }
 .sync-tag { margin-top: 5px; }
 @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } .hero { align-items: flex-start; gap: 12px; flex-direction: column; } }
 </style>
