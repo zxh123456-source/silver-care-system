@@ -12,16 +12,20 @@ import java.io.IOException;
 public class ResponseUtil {
     public static void resultOut(HttpServletResponse response, Result result) {
         String errorJson = JSONUtil.toJsonStr(result);
-        out(response, errorJson);
+        out(response, errorJson, result.getCode());
     }
 
     public static void exceptionEnumOut(HttpServletResponse response, ExceptionEnum exceptionEnum) {
         String errorJson = JSONUtil.toJsonStr(Result.error(exceptionEnum));
-        out(response, errorJson);
+        out(response, errorJson, exceptionEnum.getCode());
     }
 
-    private static void out(HttpServletResponse response, String errorJson) {
-        response.setStatus(200);
+    public static int httpStatus(Integer code) {
+        return code != null && (code == 401 || code == 403 || code == 503) ? code : 200;
+    }
+    private static void out(HttpServletResponse response, String errorJson, Integer code) {
+        // Preserve legacy business-result transport while making authentication/availability explicit.
+        response.setStatus(httpStatus(code));
         response.setContentType("application/json;charset=UTF-8");
         response.addHeader("Content-Type", "application/json;charset=utf-8");
         try {

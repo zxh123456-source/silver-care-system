@@ -1,3 +1,5 @@
+@use './variables.module' as *;
+
 .main-container {
   width: calc(100% - $sideBarWidth);
   height: 100%;

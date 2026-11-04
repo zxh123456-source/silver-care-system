@@ -1,3 +1,5 @@
+import { captureResourceSession, checkedResourceSessionConfig, resourceSessionConfig } from "@/utils/authResource";
+import type { ResourceSession } from "@/utils/authResource";
 import { http } from '@/utils'
 
 interface ISearchFormReserveByKey {
@@ -48,8 +50,8 @@ export async function pageReserveByKey(data: ISearchFormReserveByKey) {
 }
 
 // 分页搜索老人
-export function pageSearchElderByKey(data: IPageSearchElderByKey) {
-  return http.get('/api/reserve/pageSearchElderByKey', {
+export function pageSearchElderByKey(data: IPageSearchElderByKey, session: ResourceSession = captureResourceSession()) {
+  return http.get('/api/reserve/pageSearchElderByKey', { ...checkedResourceSessionConfig(session),
     params: {
       ...data
     }
@@ -67,8 +69,8 @@ export function getBuildTree() {
 }
 
 // 新增预定
-export function addReserve(data: IAddReserve) {
-  return http.post('/api/reserve/addReserve', data)
+export function addReserve(data: IAddReserve, session: ResourceSession) {
+  return http.post('/api/reserve/addReserve', data, resourceSessionConfig(session))
 }
 
 // 根据预定编号和老人编号获取预定信息
@@ -81,6 +83,6 @@ export function getReserveById(data: IGetReserveById) {
 }
 
 // 退款
-export function refund(data: IRefund) {
-  return http.put('/api/reserve/refund',data)
+export function refund(data: IRefund, session: ResourceSession) {
+  return http.put('/api/reserve/refund', data, resourceSessionConfig(session))
 }

@@ -24,7 +24,8 @@ public interface VisitMapper extends BaseMapper<Visit> {
      * @param keyQuery
      * @return
      */
-    List<PageVisitByKeyVo> listVisitByKey(@Param("keyQuery") PageVisitByKeyQuery keyQuery);
+    List<PageVisitByKeyVo> listVisitByKey(@Param("keyQuery") PageVisitByKeyQuery keyQuery,
+                                        @Param("scopeStaffId") Long scopeStaffId);
 
     /**
      * 根据编号获取来访登记

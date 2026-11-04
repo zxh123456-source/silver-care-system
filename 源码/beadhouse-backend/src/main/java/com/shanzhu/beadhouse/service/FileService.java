@@ -2,6 +2,8 @@ package com.shanzhu.beadhouse.service;
 
 import com.shanzhu.beadhouse.entity.base.Result;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.core.io.Resource;
+import org.springframework.http.ResponseEntity;
 
 public interface FileService {
 
@@ -13,5 +15,11 @@ public interface FileService {
      * @return
      */
     Result save(MultipartFile file, String module);
+
+    ResponseEntity<Resource> content(Long attachmentId);
+
+    Result resolve(String url);
+
+    Result diagnostics(long afterId, int limit);
 
 }

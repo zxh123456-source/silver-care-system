@@ -36,7 +36,7 @@ const isShow = ref(true)
 const breakPoint = inject<Ref<BreakPoint>>('breakPoint', ref('xl'))
 const shouldHiddenIndex = inject<Ref<number>>('shouldHiddenIndex', ref(-1))
 watch(
-  () => [shouldHiddenIndex.value, breakPoint.value],
+  () => [shouldHiddenIndex.value, breakPoint.value] as const,
   n => {
     if (attrs.index) {
       isShow.value = !(n[0] !== -1 && parseInt(attrs.index) >= n[0])

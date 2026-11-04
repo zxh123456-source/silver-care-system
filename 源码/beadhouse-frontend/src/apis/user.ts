@@ -1,3 +1,5 @@
+import { checkedResourceSessionConfig } from "@/utils/authResource";
+import type { ResourceSession } from "@/utils/authResource";
 import { http } from '@/utils'
 
 interface ILoginForm {
@@ -6,7 +8,6 @@ interface ILoginForm {
 }
 
 interface ISendCodeForm {
-  pass: string
   account: string
 }
 
@@ -37,11 +38,7 @@ export function getLogin(data: ILoginForm) {
 
 // 发送验证码
 export async function sendCode(data: ISendCodeForm) {
-  return http.get('/api/account/sendCode', {
-    params: {
-      ...data
-    }
-  })
+  return http.post('/api/account/sendCode', data)
 }
 
 // 忘记密码
@@ -50,8 +47,8 @@ export async function forgetPass(data: IForgetPass) {
 }
 
 // 修改密码
-export async function editPass(data: IEditPass) {
-  return http.put('/api/account/edit', data)
+export function editPass(data: IEditPass, session: ResourceSession) {
+  return http.put('/api/account/edit', data, checkedResourceSessionConfig(session))
 }
 
 // 退出登录

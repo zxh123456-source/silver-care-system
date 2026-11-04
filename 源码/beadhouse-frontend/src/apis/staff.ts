@@ -32,7 +32,7 @@ export async function getRole() {
 // 分页查询员工
 export async function pageStaffByKey(data: IPageStaffByKey) {
   // 因为后台返回的字段与前端表单数据的prop不一样，但是组件封装是需要一样的，所以请求前增加一些这两个字段
-  Reflect.has(data, 'roleName') ? (data.roleId = data.roleName) : ''
+  if (Reflect.has(data, 'roleName')) data.roleId = data.roleName
   return http.get("/api/staff/pageStaffByKey", {
     params: {
       ...data

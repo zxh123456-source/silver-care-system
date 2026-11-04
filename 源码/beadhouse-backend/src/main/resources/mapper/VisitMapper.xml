@@ -18,6 +18,7 @@
         LEFT JOIN elder e ON e.id = v.elder_id
         <where>
             v.del_flag = 'N'
+            <include refid="com.shanzhu.beadhouse.dao.mapper.ElderMapper.assignmentScope"/>
             <if test="keyQuery.elderName != null and keyQuery.elderName != '' and keyQuery.elderName != 'null'">
                 AND e.name LIKE concat('%', #{keyQuery.elderName,jdbcType=VARCHAR}, '%')
             </if>
@@ -44,6 +45,6 @@
                v.visit_num
         FROM visit v
                  LEFT JOIN elder e ON e.id = v.elder_id
-        WHERE v.id = #{visitId}
+        WHERE v.id = #{visitId} AND v.del_flag = 'N'
     </select>
 </mapper>

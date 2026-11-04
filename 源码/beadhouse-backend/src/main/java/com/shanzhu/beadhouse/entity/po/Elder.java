@@ -3,6 +3,8 @@ package com.shanzhu.beadhouse.entity.po;
 import java.math.BigDecimal;
 
 import com.shanzhu.beadhouse.entity.base.BaseEntity;
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
+import com.baomidou.mybatisplus.annotation.TableField;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
@@ -68,6 +70,8 @@ public class Elder extends BaseEntity {
     /**
      * 余额
      */
+    // Profile/state updates must never overwrite a concurrent credit or debit.
+    @TableField(updateStrategy = FieldStrategy.NEVER)
     private BigDecimal balance;
 
     /**

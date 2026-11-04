@@ -1,21 +1,20 @@
 <template>
-  <div class="ai-care-page">
+  <div class="ai-care-page care-mobile-page">
     <el-card class="hero" shadow="never">
       <div>
-        <div class="eyebrow">AI CARE WORKBENCH</div>
         <h2>护理记录与交班</h2>
         <p>把护理员的口述整理成可确认、可跟进的记录。AI 只生成草稿，保存前请人工核对。</p>
       </div>
       <div class="hero-actions">
-        <el-date-picker v-model="handoverDate" value-format="YYYY-MM-DD" type="date" placeholder="选择交班日期" :clearable="false" />
-        <el-button type="primary" @click="loadHandover">生成交班摘要</el-button>
+        <el-date-picker popper-class="care-mobile-picker" v-model="handoverDate" value-format="YYYY-MM-DD" type="date" placeholder="选择交班日期" :clearable="false" />
+        <el-button type="primary" :loading="handoverLoading" @click="loadHandover">生成交班摘要</el-button>
       </div>
     </el-card>
 
     <div class="grid">
       <el-card shadow="never">
         <template #header><span>新增护理记录</span></template>
-        <el-form label-position="top">
+        <el-form label-position="top" :disabled="draftLoading || saveLoading">
           <el-form-item label="老人编号">
             <el-input v-model="selectedElderName" placeholder="请选择老人" readonly>
               <template #append><el-button @click="openElderDialog">选择</el-button></template>
@@ -45,24 +44,27 @@
               <el-alert v-if="voiceError" class="voice-alert" :title="voiceError" type="error" :closable="false" show-icon />
             </div>
           </el-form-item>
+          <el-alert v-if="draftError" class="request-error" :title="draftError" type="error" :closable="false" show-icon />
           <el-button type="primary" :loading="draftLoading" :disabled="isListening" @click="makeDraft">生成结构化草稿</el-button>
         </el-form>
       </el-card>
 
       <el-card shadow="never">
         <template #header><span>AI 草稿（人工确认后保存）</span></template>
-        <el-empty v-if="!draft" description="输入护理员口述后生成草稿" />
-        <el-form v-else label-position="top">
+        <el-skeleton v-if="draftLoading" :rows="6" animated />
+        <el-empty v-else-if="!draft" description="输入护理员口述后生成草稿" />
+        <el-form v-else label-position="top" :disabled="saveLoading">
           <el-alert :title="draft.warning || '请核对草稿内容'" type="warning" :closable="false" show-icon />
           <el-form-item label="观察到的情况"><el-input v-model="draft.observation" type="textarea" :rows="2" /></el-form-item>
           <el-form-item label="已采取措施"><el-input v-model="draft.actionTaken" type="textarea" :rows="2" /></el-form-item>
           <el-form-item label="待跟进事项"><el-input v-model="draft.followUp" type="textarea" :rows="2" /></el-form-item>
           <el-row :gutter="12">
-            <el-col :span="12"><el-form-item label="进餐"><el-input v-model="draft.appetite" /></el-form-item></el-col>
-            <el-col :span="12"><el-form-item label="休息"><el-input v-model="draft.sleep" /></el-form-item></el-col>
-            <el-col :span="12"><el-form-item label="服药"><el-input v-model="draft.medicine" /></el-form-item></el-col>
-            <el-col :span="12"><el-form-item label="活动"><el-input v-model="draft.activity" /></el-form-item></el-col>
+            <el-col :xs="24" :sm="12"><el-form-item label="进餐"><el-input v-model="draft.appetite" /></el-form-item></el-col>
+            <el-col :xs="24" :sm="12"><el-form-item label="休息"><el-input v-model="draft.sleep" /></el-form-item></el-col>
+            <el-col :xs="24" :sm="12"><el-form-item label="服药"><el-input v-model="draft.medicine" /></el-form-item></el-col>
+            <el-col :xs="24" :sm="12"><el-form-item label="活动"><el-input v-model="draft.activity" /></el-form-item></el-col>
           </el-row>
+          <el-alert v-if="saveError" class="request-error" :title="saveError" type="error" :closable="false" show-icon />
           <el-button type="success" :loading="saveLoading" @click="confirmSave">确认并保存</el-button>
         </el-form>
       </el-card>
@@ -71,32 +73,38 @@
     <el-card class="family-report" shadow="never">
       <template #header><span>家属周报草稿</span><el-tag size="small" type="info">人工审核后发送</el-tag></template>
       <div class="report-toolbar">
-        <el-date-picker v-model="reportStart" value-format="YYYY-MM-DD" type="date" placeholder="开始日期" />
+        <el-date-picker popper-class="care-mobile-picker" v-model="reportStart" value-format="YYYY-MM-DD" type="date" placeholder="开始日期" />
         <span>至</span>
-        <el-date-picker v-model="reportEnd" value-format="YYYY-MM-DD" type="date" placeholder="结束日期" />
+        <el-date-picker popper-class="care-mobile-picker" v-model="reportEnd" value-format="YYYY-MM-DD" type="date" placeholder="结束日期" />
         <el-button type="primary" :loading="reportLoading" :disabled="!form.elderId" @click="makeFamilyReport">生成周报草稿</el-button>
       </div>
+      <el-alert v-if="reportError" class="request-error" :title="reportError" type="error" :closable="false" show-icon />
+      <el-skeleton v-if="reportLoading" :rows="4" animated />
       <el-alert v-if="report?.warning" :title="report.warning" type="warning" :closable="false" show-icon />
       <el-input v-if="report" v-model="report.summary" class="report-text" type="textarea" :rows="6" />
-      <el-empty v-else description="选择老人和日期范围后生成家属周报" />
+      <el-empty v-else-if="!reportLoading" description="选择老人和日期范围后生成家属周报" />
     </el-card>
 
+    <el-alert v-if="handoverError" class="request-error" :title="handoverError" type="error" :closable="false" show-icon>
+      <el-button :loading="handoverLoading" @click="loadHandover">重新加载</el-button>
+    </el-alert>
+    <el-skeleton v-if="handoverLoading && !handover" :rows="4" animated />
     <el-card v-if="handover" class="handover" shadow="never">
       <template #header><span>{{ handover.date }} 交班摘要</span><el-tag type="info">{{ handover.count }} 条记录 / 已完成 {{ handover.completedCount }} 条</el-tag></template>
       <p class="summary">{{ handover.summary }} <el-tag v-if="handover.modelUsed" size="small" type="success">模型摘要</el-tag></p>
       <el-divider />
       <div v-if="handover.notes.length" class="follow-ups">
         <div v-for="item in handover.notes" :key="item.id" class="follow-up" :class="{ done: item.status === 'DONE' }">
-          <span class="note-preview" @click="viewNote(item)"><b>{{ item.elderName || `老人${item.elderId}` }}</b>：{{ item.followUp || '本条记录未填写待跟进事项' }}<small v-if="item.staffName">（记录人：{{ item.staffName }}）</small></span>
-          <el-button v-if="item.followUp && item.status !== 'DONE'" size="small" type="success" link @click="completeNote(item.id)">标记完成</el-button>
+          <button type="button" class="note-preview" @click="viewNote(item)"><b>{{ item.elderName || `老人${item.elderId}` }}</b>：{{ item.followUp || '本条记录未填写待跟进事项' }}<small v-if="item.staffName">（记录人：{{ item.staffName }}）</small></button>
+          <el-button v-if="item.followUp && item.status !== 'DONE'" size="small" type="success" link :loading="completingId === item.id" :disabled="completingId !== undefined" @click="completeNote(item.id)">标记完成</el-button>
           <el-tag v-else-if="item.followUp" size="small" type="success">已完成</el-tag>
         </div>
       </div>
       <el-empty v-else description="暂无待跟进事项" />
     </el-card>
   </div>
-  <elder-list-dialog ref="elderDialogRef" @get-check-elder-info="getCheckElderInfo" />
-  <el-dialog v-model="detailVisible" title="护理记录详情" width="560px">
+  <elder-list-dialog class="care-mobile-dialog care-elder-picker" ref="elderDialogRef" @get-check-elder-info="getCheckElderInfo" />
+  <el-dialog class="care-mobile-dialog" v-model="detailVisible" title="护理记录详情" width="560px" :close-on-click-modal="!editLoading" :close-on-press-escape="!editLoading" :show-close="!editLoading">
     <el-descriptions v-if="selectedNote && !detailEditing" :column="1" border>
       <el-descriptions-item label="老人">{{ selectedNote.elderName || `老人${selectedNote.elderId}` }}</el-descriptions-item>
       <el-descriptions-item label="记录人">{{ selectedNote.staffName || '未记录' }}</el-descriptions-item>
@@ -105,20 +113,21 @@
       <el-descriptions-item label="已采取措施">{{ selectedNote.actionTaken || '未填写' }}</el-descriptions-item>
       <el-descriptions-item label="待跟进事项">{{ selectedNote.followUp || '未填写' }}</el-descriptions-item>
     </el-descriptions>
-    <el-form v-else-if="selectedNote" :model="editForm" label-position="top">
+    <el-form v-else-if="selectedNote" :disabled="editLoading" :model="editForm" label-position="top">
       <el-form-item label="原始口述"><el-input v-model="editForm.sourceText" type="textarea" :rows="3" /></el-form-item>
       <el-form-item label="观察情况"><el-input v-model="editForm.observation" type="textarea" :rows="2" /></el-form-item>
       <el-form-item label="已采取措施"><el-input v-model="editForm.actionTaken" type="textarea" :rows="2" /></el-form-item>
       <el-form-item label="待跟进事项"><el-input v-model="editForm.followUp" type="textarea" :rows="2" /></el-form-item>
       <el-row :gutter="12">
-        <el-col :span="12"><el-form-item label="进餐"><el-input v-model="editForm.appetite" /></el-form-item></el-col>
-        <el-col :span="12"><el-form-item label="休息"><el-input v-model="editForm.sleep" /></el-form-item></el-col>
-        <el-col :span="12"><el-form-item label="服药"><el-input v-model="editForm.medicine" /></el-form-item></el-col>
-        <el-col :span="12"><el-form-item label="活动"><el-input v-model="editForm.activity" /></el-form-item></el-col>
+        <el-col :xs="24" :sm="12"><el-form-item label="进餐"><el-input v-model="editForm.appetite" /></el-form-item></el-col>
+        <el-col :xs="24" :sm="12"><el-form-item label="休息"><el-input v-model="editForm.sleep" /></el-form-item></el-col>
+        <el-col :xs="24" :sm="12"><el-form-item label="服药"><el-input v-model="editForm.medicine" /></el-form-item></el-col>
+        <el-col :xs="24" :sm="12"><el-form-item label="活动"><el-input v-model="editForm.activity" /></el-form-item></el-col>
       </el-row>
     </el-form>
+    <el-alert v-if="editError" class="request-error" :title="editError" type="error" :closable="false" show-icon />
     <template #footer v-if="selectedNote">
-      <el-button @click="detailVisible = false">关闭</el-button>
+      <el-button :disabled="editLoading" @click="detailVisible = false">关闭</el-button>
       <el-button v-if="!detailEditing" type="primary" @click="detailEditing = true">编辑记录</el-button>
       <el-button v-else type="success" :loading="editLoading" @click="saveEditedNote">保存修改</el-button>
     </template>
@@ -131,6 +140,8 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { AiCareDraft, completeCareNote, createCareDraft, createFamilyReport, getHandover, saveCareNote, updateCareNote } from "@/apis/aiCare";
 import { pageAccessibleElders } from "@/apis/aiScope";
 import elderListDialog from "@/components/elderListDialog/index.vue";
+import { handleRequestFailure } from "@/utils/requestFailure";
+import { useCarePageSession } from "@/views/ai/care/useCarePageSession";
 
 interface SpeechRecognitionAlternativeLike {
   transcript: string;
@@ -198,6 +209,21 @@ const draftLoading = ref(false);
 const saveLoading = ref(false);
 const reportLoading = ref(false);
 const report = ref<any>(null);
+const handoverLoading = ref(false);
+const completingId = ref<number>();
+const draftError = ref("");
+const saveError = ref("");
+const editError = ref("");
+const reportError = ref("");
+const handoverError = ref("");
+let handoverRequest = 0;
+const pageSession = useCarePageSession(() => {
+  discardVoiceRecognition();
+  form.value = { elderId: 0, sourceText: "" }; selectedElderName.value = "";
+  draft.value = null; report.value = null; handover.value = null; selectedNote.value = null;
+  detailVisible.value = false; editForm.value = {};
+  draftError.value = saveError.value = editError.value = reportError.value = handoverError.value = "";
+});
 const isSpeechSupported = ref(Boolean(getSpeechRecognitionConstructor()));
 const isListening = ref(false);
 const isStopping = ref(false);
@@ -325,28 +351,38 @@ function stopVoiceRecognition() {
 }
 
 async function makeDraft() {
+  if (draftLoading.value || saveLoading.value || isListening.value) return;
   if (!form.value.elderId) return ElMessage.warning("请选择老人");
   if (!form.value.sourceText.trim()) return ElMessage.warning("请先填写护理员口述");
-  draftLoading.value = true;
+  const session = pageSession.capture();
+  draftLoading.value = true; draftError.value = "";
   try {
-    const res: any = await createCareDraft(form.value);
+    const res: any = await createCareDraft({ ...form.value }, session);
+    if (!pageSession.current(session)) return;
+    if (res.code !== 200) throw res;
     draft.value = res.data;
+  } catch (error) {
+    if (!pageSession.current(session)) return;
+    handleRequestFailure(error);
+    draftError.value = "草稿暂未生成，口述已保留，请重试。";
   } finally {
     draftLoading.value = false;
   }
 }
 
 function openElderDialog() {
-  elderDialogRef.value?.elderAcceptParams({ elderApi: pageAccessibleElders });
+  elderDialogRef.value?.elderAcceptParams({ elderApi: pageAccessibleElders, fixedOperation: true });
 }
 
 function getCheckElderInfo(row: any) {
   form.value.elderId = row.id;
   selectedElderName.value = row.name;
+  draft.value = null; report.value = null; draftError.value = saveError.value = reportError.value = "";
 }
 
 function viewNote(note: any) {
   selectedNote.value = note;
+  editError.value = "";
   editForm.value = {
     id: note.id,
     elderId: note.elderId,
@@ -364,36 +400,56 @@ function viewNote(note: any) {
 }
 
 async function saveEditedNote() {
+  if (editLoading.value) return;
   if (!editForm.value.sourceText.trim()) return ElMessage.warning("原始口述不能为空");
-  editLoading.value = true;
+  const session = pageSession.capture();
+  editLoading.value = true; editError.value = "";
   try {
-    await updateCareNote(editForm.value);
+    const res: any = await updateCareNote({ ...editForm.value }, session);
+    if (!pageSession.current(session)) return;
+    if (res.code !== 200) throw res;
     ElMessage.success("护理记录已更新");
     detailEditing.value = false;
     detailVisible.value = false;
     await loadHandover();
+    if (handoverError.value) handoverError.value = "护理记录已更新，交班摘要暂未刷新，请重新加载。";
+  } catch (error) {
+    if (!pageSession.current(session)) return;
+    handleRequestFailure(error);
+    editError.value = "修改结果未确认，输入已保留，请先重新加载交班摘要核对后再重试。";
   } finally {
     editLoading.value = false;
   }
 }
 
 async function makeFamilyReport() {
+  if (reportLoading.value) return;
   if (!form.value.elderId) return ElMessage.warning("请先选择老人");
+  if (!reportStart.value || !reportEnd.value) return ElMessage.warning("请选择开始和结束日期");
   if (reportStart.value > reportEnd.value) return ElMessage.warning("开始日期不能晚于结束日期");
-  reportLoading.value = true;
+  const session = pageSession.capture();
+  const payload = { elderId: form.value.elderId, startDate: reportStart.value, endDate: reportEnd.value };
+  reportLoading.value = true; reportError.value = "";
   try {
-    const res: any = await createFamilyReport({ elderId: form.value.elderId, startDate: reportStart.value, endDate: reportEnd.value });
+    const res: any = await createFamilyReport(payload, session);
+    if (!pageSession.current(session) || payload.elderId !== form.value.elderId || payload.startDate !== reportStart.value || payload.endDate !== reportEnd.value) return;
+    if (res.code !== 200) throw res;
     report.value = res.data;
+  } catch (error) {
+    if (!pageSession.current(session)) return;
+    handleRequestFailure(error);
+    reportError.value = "周报暂未生成，请重试。";
   } finally {
     reportLoading.value = false;
   }
 }
 
 async function confirmSave() {
-  if (!draft.value) return;
-  saveLoading.value = true;
+  if (!draft.value || saveLoading.value) return;
+  const session = pageSession.capture();
+  saveLoading.value = true; saveError.value = "";
   try {
-    await saveCareNote({
+    const res: any = await saveCareNote({
       elderId: draft.value.elderId,
       sourceText: draft.value.sourceText,
       observation: draft.value.observation,
@@ -403,48 +459,80 @@ async function confirmSave() {
       sleep: draft.value.sleep,
       medicine: draft.value.medicine,
       activity: draft.value.activity
-    });
+    }, session);
+    if (!pageSession.current(session)) return;
+    if (res.code !== 200) throw res;
     ElMessage.success("护理记录已保存");
     draft.value = null;
     form.value.sourceText = "";
     await loadHandover();
+    if (handoverError.value) handoverError.value = "护理记录已保存，交班摘要暂未刷新，请重新加载。";
+  } catch (error) {
+    if (!pageSession.current(session)) return;
+    handleRequestFailure(error);
+    saveError.value = "保存结果未确认，草稿已保留，请先重新加载交班摘要核对后再重试。";
   } finally {
     saveLoading.value = false;
   }
 }
 
 async function loadHandover() {
-  const res: any = await getHandover(handoverDate.value);
-  handover.value = res.data;
+  const session = pageSession.capture();
+  const request = ++handoverRequest;
+  handoverLoading.value = true; handoverError.value = "";
+  try {
+    const res: any = await getHandover(handoverDate.value, session);
+    if (!pageSession.current(session) || request !== handoverRequest) return;
+    if (res.code !== 200) throw res;
+    handover.value = res.data;
+  } catch (error) {
+    if (!pageSession.current(session) || request !== handoverRequest) return;
+    handleRequestFailure(error);
+    handoverError.value = "交班摘要暂未加载，请重新加载。";
+  } finally { if (request === handoverRequest) handoverLoading.value = false; }
 }
 
 async function completeNote(id: number) {
-  await completeCareNote(id);
-  ElMessage.success("待跟进事项已完成");
-  await loadHandover();
+  if (completingId.value !== undefined) return;
+  const session = pageSession.capture();
+  completingId.value = id; handoverError.value = "";
+  try {
+    const res: any = await completeCareNote(id, session);
+    if (!pageSession.current(session)) return;
+    if (res.code !== 200) throw res;
+    ElMessage.success("待跟进事项已完成");
+    await loadHandover();
+  } catch (error) {
+    if (!pageSession.current(session)) return;
+    handleRequestFailure(error);
+    handoverError.value = "完成状态未确认，请重新加载核对后重试。";
+  } finally { completingId.value = undefined; }
 }
 
 onMounted(loadHandover);
 
-onBeforeUnmount(() => {
-  if (!speechRecognition) return;
-  speechRecognition.onstart = null;
-  speechRecognition.onresult = null;
-  speechRecognition.onerror = null;
-  speechRecognition.onend = null;
-  speechRecognition.abort();
-  speechRecognition = null;
-});
+function discardVoiceRecognition() {
+  if (speechRecognition) {
+    speechRecognition.onstart = null;
+    speechRecognition.onresult = null;
+    speechRecognition.onerror = null;
+    speechRecognition.onend = null;
+    speechRecognition.abort();
+    speechRecognition = null;
+  }
+  isListening.value = false; isStopping.value = false;
+  voiceFinalText.value = ""; voiceInterimText.value = ""; voiceError.value = "";
+}
+onBeforeUnmount(discardVoiceRecognition);
 </script>
 
 <style lang="scss" scoped>
 .ai-care-page { padding: 4px; }
 .hero { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; background: linear-gradient(120deg, #eff6ff, #f8fbff); }
 .hero-actions { display: flex; align-items: center; gap: 10px; }
-.eyebrow { color: #409eff; font-size: 12px; letter-spacing: 1.5px; }
 h2 { margin: 6px 0; color: #1f2937; }
 p { margin: 0; color: #6b7280; }
-.grid { display: grid; grid-template-columns: 1fr 1.2fr; gap: 16px; }
+.grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 16px; }
 .handover { margin-top: 16px; }
 .family-report { margin-top: 16px; }
 .report-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
@@ -459,7 +547,7 @@ p { margin: 0; color: #6b7280; }
 .follow-up { padding: 10px 12px; margin-bottom: 8px; border-radius: 6px; background: #fff7ed; color: #9a3412; }
 .follow-up { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .follow-up.done { background: #f0fdf4; color: #166534; }
-.note-preview { cursor: pointer; flex: 1; }
+.note-preview { cursor: pointer; flex: 1; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; padding: 0; }
 .note-preview:hover { text-decoration: underline; }
 @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } .hero { align-items: flex-start; gap: 12px; flex-direction: column; } .hero-actions, .report-toolbar { width: 100%; flex-wrap: wrap; } }
 </style>

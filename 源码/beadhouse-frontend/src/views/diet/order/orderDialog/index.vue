@@ -22,7 +22,7 @@
                     <el-button
                       @click="openElderDrawer"
                       :icon="Plus"
-                      :style="{cursor: (drawerProps.title !== '新增' ? not-allowed : cursor)}"
+                      :style="{cursor: (drawerProps.title !== '新增' ? 'not-allowed' : 'pointer')}"
                       :disabled="drawerProps.title !== '新增'"
                     />
                   </template>
@@ -38,7 +38,7 @@
                 >
                   <el-option
                     clearable
-                    :label="item.name"
+                    :label="item.label"
                     :value="item.value"
                     v-for="item in DineTypeList"
                     :key="item.value"
@@ -73,7 +73,7 @@
                       <el-button
                         class="bg-blue"
                         type="primary"
-                        icon="Plus"
+                        :icon="Plus"
                         circle
                         style="position: absolute;width: 27.6px;height: 27.6px; top: 6.5px; left: 1.7%;z-index: 1000"
                         @click="openDishesDrawer"
@@ -162,17 +162,15 @@
 </template>
 
 <script lang="ts" setup>
+import { handleRequestFailure } from "@/utils/requestFailure";
 import { reactive, ref } from "vue";
 import elderListDialog from "@/components/elderListDialog/index.vue";
 import dishesListDialog from "@/views/diet/package/packageDialog/dishesListDialog.vue";
 import { ElMessage, FormInstance, FormRules } from "element-plus";
 import { Plus, Delete } from "@element-plus/icons-vue";
 import { IDineTypeList, listNurseStaff, pageSearchElderByKey } from "@/apis/order";
-import { arrayDeduplicationByFiled, arrayPushAllByFiled, arrayPushAllByObj, initArray } from "@/utils/commonUtil";
-import {
-  disabledNowBeforeDate,
-  disabledNowAfterDate
-} from "@/utils/formRules"
+import { arrayDeduplicationByFiled, initArray } from "@/utils/commonUtil";
+import { disabledNowBeforeDate } from "@/utils/formRules"
 
 const ruleFormRef = ref<FormInstance | null>(null);
 const dialogVisible = ref(false);
@@ -214,6 +212,13 @@ const drawerProps = ref<DialogProps>({
   title: ""
 });
 
+interface SelectedDish {
+  id: number;
+  dishesName: string;
+  price: number;
+  orderNum: number;
+}
+
 const formData = ref({
   id: "",
   elderId: "",
@@ -226,7 +231,7 @@ const formData = ref({
     dishesId: "",
     orderNum: ""
   }],
-  setDishesVoList: []
+  setDishesVoList: [] as SelectedDish[]
 });
 
 // 打开选择老人的列表 drawer
@@ -251,13 +256,13 @@ const openDishesDrawer = () => {
 };
 
 // 添加菜品
-const addDishes = (dishesList: any) => {
+const addDishes = (dishesList: SelectedDish[]) => {
   // 初始化Array
   formData.value.orderDishesList = initArray(formData.value.orderDishesList);
   formData.value.setDishesVoList = initArray(formData.value.setDishesVoList);
 
   // 传入所有对象
-  dishesList.value.forEach((dishes: any) => {
+  dishesList.forEach((dishes: any) => {
     dishes.orderNum = dishes.orderNum ? dishes.orderNum : 1;
     formData.value.setDishesVoList.push(dishes);
   });
@@ -315,7 +320,7 @@ const handleSubmit = () => {
         });
       }
     } catch (error) {
-      console.log(error);
+      handleRequestFailure(error);
     }
   });
 };

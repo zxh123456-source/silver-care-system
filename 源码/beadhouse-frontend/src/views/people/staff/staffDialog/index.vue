@@ -109,6 +109,7 @@
 </template>
 
 <script lang="ts" setup>
+import { handleRequestFailure } from "@/utils/requestFailure";
 import { reactive, ref } from "vue";
 import uploadImage from "@/components/upload/image/index.vue";
 import { ElMessage, FormInstance, FormRules, UploadUserFile } from "element-plus";
@@ -261,7 +262,7 @@ const handleSubmit = () => {
         });
       }
     } catch (error) {
-      console.log(error);
+      handleRequestFailure(error);
     }
   });
 };

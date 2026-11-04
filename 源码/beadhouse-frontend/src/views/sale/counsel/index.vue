@@ -65,7 +65,6 @@ import {
   listConsultStaff,
   delConsult
 } from "@/apis/soldManage";
-import { TableColumnCtx } from "element-plus/es/components/table/src/table-column/defaults";
 
 // 获取 ProTable 元素，调用其获取刷新数据方法（还能获取到当前查询参数，方便导出携带参数）
 const proTable = ref();

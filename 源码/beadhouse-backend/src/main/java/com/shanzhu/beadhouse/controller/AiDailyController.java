@@ -19,6 +19,63 @@ import java.util.Date;
 public class AiDailyController {
     @Resource
     private AiDailyService dailyService;
+    @Resource
+    private com.shanzhu.beadhouse.service.common.DailyTaskService taskService;
+    @Resource
+    private com.shanzhu.beadhouse.service.common.CareAlertService alerts;
+    @Resource
+    private com.shanzhu.beadhouse.service.common.CareNotificationService notifications;
+
+    @GetMapping("/notifications")
+    public Result notifications(@RequestParam(defaultValue="0") Long afterId,
+                                @RequestParam(defaultValue="20") Integer limit,@RequestHeader String token) {
+        return notifications.list(afterId,limit);
+    }
+    @GetMapping("/notification-count")
+    public Result notificationCount(@RequestHeader String token) { return notifications.count(); }
+    @PostMapping("/notifications/read")
+    public Result readNotification(@RequestBody com.shanzhu.beadhouse.entity.query.CareNotificationReadQuery query,
+                                   @RequestHeader String token) { return notifications.read(query); }
+    @GetMapping("/scan-status")
+    public Result scanStatus(@RequestHeader String token) { return notifications.scanStatus(); }
+
+    @GetMapping("/alerts")
+    public Result alerts(@RequestParam(defaultValue="ACTIVE") String state,@RequestHeader String token) {
+        return alerts.list(state);
+    }
+    @PostMapping("/alerts/scan")
+    public Result scanAlerts(@RequestParam(required=false) @DateTimeFormat(pattern="yyyy-MM-dd") Date date,
+                             @RequestHeader String token) { return alerts.scan(date); }
+    @PostMapping("/alerts/ack")
+    public Result acknowledgeAlert(@RequestBody com.shanzhu.beadhouse.entity.query.DailyTaskActionQuery query,
+                                   @RequestHeader String token) { return alerts.act("ack",query); }
+    @PostMapping("/alerts/resolve")
+    public Result resolveAlert(@RequestBody com.shanzhu.beadhouse.entity.query.DailyTaskActionQuery query,
+                               @RequestHeader String token) { return alerts.act("resolve",query); }
+
+    @PostMapping("/tasks/sync")
+    public Result syncTasks(@RequestParam(required=false) @DateTimeFormat(pattern="yyyy-MM-dd") Date date,
+                            @RequestHeader String token) { return taskService.sync(date); }
+
+    @GetMapping("/tasks")
+    public Result tasks(@RequestParam(required=false) @DateTimeFormat(pattern="yyyy-MM-dd") Date date,
+                        @RequestParam(defaultValue="ACTIVE") String state,
+                        @RequestHeader String token) { return taskService.list(date,state); }
+
+    @GetMapping("/tasks/owners")
+    public Result owners(@RequestParam Long id,@RequestHeader String token) { return taskService.owners(id); }
+
+    @PostMapping("/tasks/claim")
+    public Result claim(@RequestBody com.shanzhu.beadhouse.entity.query.DailyTaskActionQuery query,
+                        @RequestHeader String token) { return taskService.act("claim",query); }
+
+    @PostMapping("/tasks/transfer")
+    public Result transfer(@RequestBody com.shanzhu.beadhouse.entity.query.DailyTaskActionQuery query,
+                           @RequestHeader String token) { return taskService.act("transfer",query); }
+
+    @PostMapping("/tasks/complete")
+    public Result complete(@RequestBody com.shanzhu.beadhouse.entity.query.DailyTaskActionQuery query,
+                           @RequestHeader String token) { return taskService.act("complete",query); }
 
     @GetMapping("/overview")
     @ApiOperation(value = "生成只读每日护理汇总", notes = Constant.DEVELOPER + Constant.EMPEROR_WEN)

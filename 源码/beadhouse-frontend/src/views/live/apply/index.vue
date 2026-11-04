@@ -26,7 +26,6 @@ import { Plus } from "@icon-park/vue-next";
 import elderListDialog from "@/components/elderListDialog/index.vue";
 import { ColumnProps } from "@/components/ProTable/interface";
 import ProTable from "@/components/ProTable/index.vue";
-import { Delete, EditPen, View } from "@element-plus/icons-vue";
 import { addRetreatApply, pageRetreatApplyByKey, pageSearchElderByKey } from "@/apis/retreatApply";
 import { ElMessage } from "element-plus";
 

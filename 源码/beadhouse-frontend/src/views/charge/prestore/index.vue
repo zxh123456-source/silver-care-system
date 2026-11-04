@@ -20,15 +20,18 @@
         >
           账户充值
         </el-button>
+        <el-button size="small" link @click="openLedger(scope.row)">充值记录</el-button>
       </template>
     </ProTable>
     <prestoreDialog ref="DialogRef" />
+    <rechargeLedgerDialog ref="LedgerDialogRef" />
   </div>
 </template>
 
 <script setup lang="ts" name="useProTable">
 import { ref, reactive } from "vue";
 import prestoreDialog from "./prestoreDialog/index.vue";
+import rechargeLedgerDialog from "./rechargeLedgerDialog/index.vue";
 import { ColumnProps } from "@/components/ProTable/interface";
 import ProTable from "@/components/ProTable/index.vue";
 import { CreditCard } from "@element-plus/icons-vue";
@@ -58,6 +61,8 @@ const getTableList = (params: any) => {
 
 // 打开 drawer(新增、查看、编辑)
 const DialogRef = ref();
+const LedgerDialogRef = ref();
+const openLedger = (row: any) => LedgerDialogRef.value.acceptParams(row);
 const openDrawer = (title: string, rowData: any = {}) => {
   const params = {
     title,
@@ -76,7 +81,7 @@ const columns: ColumnProps<any>[] = [
   { prop: "idNum", label: "身份证号", search: { el: "input" } },
   { prop: "elderPhone", label: "老人电话", search: { el: "input" } },
   { prop: "balance", label: "账户余额" },
-  { prop: "operation", label: "操作", width: 150 }
+  { prop: "operation", label: "操作", width: 220 }
 ];
 </script>
 

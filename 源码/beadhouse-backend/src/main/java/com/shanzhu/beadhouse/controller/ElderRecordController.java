@@ -12,6 +12,10 @@ import io.swagger.annotations.ApiOperation;
 import io.swagger.annotations.ApiParam;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 
 import javax.annotation.Resource;
 import java.io.IOException;
@@ -30,8 +34,13 @@ public class ElderRecordController {
 
     @GetMapping("/exportExcel")
     @ApiOperation(value = "导出excel", notes = Constant.DEVELOPER + Constant.EMPEROR_WEN)
-    public Result exportExcel(@ApiParam(value = "接口访问请求头", required = true) @RequestHeader String token) throws IOException {
-        return elderRecordService.exportExcel();
+    public ResponseEntity<byte[]> exportExcel(@ApiParam(value = "接口访问请求头", required = true) @RequestHeader String token) throws IOException {
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment().filename("elders.xlsx").build().toString())
+                .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+                .header("X-Content-Type-Options", "nosniff")
+                .body(elderRecordService.exportExcel());
     }
 
     @GetMapping("/pageElderByKey")

@@ -1,3 +1,5 @@
+import type { ResourceSession } from "@/utils/authResource";
+import { captureResourceSession, checkedResourceSessionConfig } from "@/utils/authResource";
 import { http } from '@/utils'
 
 interface IAddConsult {
@@ -87,8 +89,8 @@ export function listConsultStaff() {
 // 分页查询咨询
 export async function pageConsultByKey(data: ISearhFormConsultByKey) {
   // 因为后台返回的字段与前端表单数据的prop不一样，但是组件封装是需要一样的，所以请求前增加一些这两个字段
-  Reflect.has(data, 'sourceName') ? (data.sourceId = data.sourceName) : ''
-  Reflect.has(data, 'staffName') ? (data.staffId = data.staffName) : ''
+  if (Reflect.has(data, 'sourceName')) data.sourceId = data.sourceName
+  if (Reflect.has(data, 'staffName')) data.staffId = data.staffName
   const res = await http.get('/api/consult/pageConsultByKey', {
     params: {
       ...data
@@ -215,8 +217,8 @@ export function pageCommunicationRecord(data: any) {
 }
 
 // 分页搜索老人
-export function pageSearchElderByKey(data: any) {
-  return http.get('/intention/pageSearchElderByKey', {
+export function pageSearchElderByKey(data: any, session: ResourceSession = captureResourceSession()) {
+  return http.get('/api/intention/pageSearchElderByKey', { ...checkedResourceSessionConfig(session),
     params: {
       ...data
     }

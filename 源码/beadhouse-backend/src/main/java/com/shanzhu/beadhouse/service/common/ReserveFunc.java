@@ -39,9 +39,16 @@ public class ReserveFunc extends ServiceImpl<ReserveMapper, Reserve> {
      * @param elderId
      * @return
      */
+    public void assertUnexpired(Reserve reserve) {
+        if (reserve.getDueDate() == null || com.shanzhu.beadhouse.common.util.DateUtilWen.getDayEndTime(reserve.getDueDate()).before(new Date()))
+            throw new com.shanzhu.beadhouse.common.config.exception.BusinessRuntimeException(409, "预订已过期，请等待到期处理后重新办理");
+    }
+
     public Reserve operateReserveInitElder(AddReserveQuery addReserveQuery, Long elderId) {
         Reserve reserve = new Reserve();
         reserve.setElderId(elderId);
+        reserve.setBedId(addReserveQuery.getBedId());
+        reserve.setState(Reserve.ACTIVE);
         reserve.setStaffId(addReserveQuery.getStaffId());
         reserve.setName(addReserveQuery.getPayerName());
         reserve.setPhone(addReserveQuery.getPayerPhone());

@@ -42,7 +42,7 @@
 </template>
 
 <script lang="ts" setup>
-import { MusicList, Mail } from '@icon-park/vue-next'
+import { Mail } from '@icon-park/vue-next'
 import { getTodayOverview } from '@/apis/home'
 import { onMounted, ref } from 'vue'
 const overViewData = ref()

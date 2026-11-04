@@ -29,8 +29,7 @@ public class AesUtil {
             byte[] bytes = cipher.doFinal(encodeStr.getBytes());
             return new String(Hex.encode(bytes));
         } catch (Exception e) {
-            e.printStackTrace();
-            return null;
+            throw new IllegalStateException("历史密码兼容需要有效的 LEGACY_AES_IV 和 LEGACY_AES_KEY", e);
         }
     }
 
@@ -49,8 +48,7 @@ public class AesUtil {
             byte[] bytes = cipher.doFinal(Hex.decode(decodeStr));
             return new String(bytes);
         } catch (Exception e) {
-            e.printStackTrace();
-            return null;
+            throw new IllegalStateException("历史密码解密失败，请检查 LEGACY_AES_IV 和 LEGACY_AES_KEY", e);
         }
     }
 

@@ -1,6 +1,5 @@
 package com.shanzhu.beadhouse.common.config.web;
 
-import com.shanzhu.beadhouse.common.config.file.FileTempPath;
 import lombok.AllArgsConstructor;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
@@ -10,7 +9,6 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 @Configuration
 @AllArgsConstructor
 public class WebMvcConfig implements WebMvcConfigurer {
-    private final FileTempPath fileTempPath;
 
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
@@ -21,11 +19,7 @@ public class WebMvcConfig implements WebMvcConfigurer {
         registry.addResourceHandler("/swagger-*/**").addResourceLocations("classpath:/META-INF/resources/");
         registry.addResourceHandler("swagger-ui.html").addResourceLocations("classpath:/META-INF/resources/");
         registry.addResourceHandler("/webjars/**").addResourceLocations("classpath:/META-INF/resources/webjars/");
-        // 文件资源
-        registry.addResourceHandler("/download/**").addResourceLocations("file:" + fileTempPath.downloadPath());
-        registry.addResourceHandler("/upload/img/**").addResourceLocations("file:" + fileTempPath.imgSrcPath());
-        registry.addResourceHandler("/upload/video/**").addResourceLocations("file:" + fileTempPath.videoSrcPath());
-        registry.addResourceHandler("/upload/file/**").addResourceLocations("file:" + fileTempPath.filePath());
+        // Disk files are served exclusively by the authenticated FileController.
     }
 
     @Override

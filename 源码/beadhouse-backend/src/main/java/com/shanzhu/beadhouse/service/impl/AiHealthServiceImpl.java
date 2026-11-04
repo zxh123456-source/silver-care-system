@@ -48,6 +48,8 @@ public class AiHealthServiceImpl implements AiHealthService {
     private HealthChangeDetector healthChangeDetector;
     @Resource
     private AiMetricRecorder metricRecorder;
+    @Resource
+    private com.shanzhu.beadhouse.service.common.CareAlertService careAlerts;
 
     @Value("${ai.provider.enabled:false}")
     private boolean providerEnabled;
@@ -61,6 +63,7 @@ public class AiHealthServiceImpl implements AiHealthService {
     private int providerTimeoutMs;
 
     @Override
+    @org.springframework.transaction.annotation.Transactional
     public Result addMeasurement(HealthMeasurementQuery query) {
         if (query == null || query.getElderId() == null) {
             return Result.error(400, "请选择老人");
@@ -88,6 +91,7 @@ public class AiHealthServiceImpl implements AiHealthService {
         data.setPostprandialBloodGlucose(query.getPostprandialBloodGlucose());
         data.setRemarks(query.getRemarks());
         healthDataMapper.insert(data);
+        careAlerts.measurement(data);
         auditRecorder.record("健康趋势", "新增健康测量", "health_data", data.getId(), null);
         return Result.success(data);
     }

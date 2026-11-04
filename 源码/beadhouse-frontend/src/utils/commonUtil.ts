@@ -7,7 +7,6 @@ export const initArray = (array: any) => {
 export const arrayPushAllByFiled = (dataArray: any, pushArray: any, field: any) => {
   // 初始化
   dataArray = initArray(dataArray);
-  pushArray = initArray(pushArray);
 
   // 法一
   // for (const item of dataArray) {

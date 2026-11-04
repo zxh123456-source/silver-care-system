@@ -21,9 +21,9 @@ public interface Constant {
 
     // AES
     //偏移量,AES 为16bytes. DES 为8bytes
-    String IV = env("LEGACY_AES_IV", "dev-aes-iv-16!!!");
+    String IV = env("LEGACY_AES_IV", "");
     //私钥,AES固定格式为128/192/256 bits.即：16/24/32bytes。DES固定格式为64bits，即8bytes。
-    String AES_KEY = env("LEGACY_AES_KEY", "dev-aes-key-16!!");
+    String AES_KEY = env("LEGACY_AES_KEY", "");
     //填充类型，DES加密把前面的AES改成DES即可
     String AES_TYPE = "AES/CBC/PKCS5Padding";
 
@@ -33,11 +33,11 @@ public interface Constant {
     // 发行人
     String TOKEN_ISSURE = "程序员山山";
     // 签名哈希
-    String TOKEN_SECRET = env("JWT_SECRET", "local-dev-jwt-secret-change-before-use-2026");
+    String TOKEN_SECRET = env("JWT_SECRET", "");
 
     // EMAIL
     // 邮箱地址
-    String MAIL_HOST = env("MAIL_HOST", "smtp.qq.com");
+    String MAIL_HOST = env("MAIL_HOST", "");
     // 企业邮箱
     String MAIL = env("MAIL_ADDRESS", "");
     // 企业邮箱

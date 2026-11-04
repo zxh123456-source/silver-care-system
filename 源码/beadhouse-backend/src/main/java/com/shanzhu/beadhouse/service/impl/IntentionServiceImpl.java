@@ -1,6 +1,7 @@
 package com.shanzhu.beadhouse.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
+import cn.hutool.core.convert.Convert;
 import cn.hutool.core.util.ObjUtil;
 import com.shanzhu.beadhouse.common.constant.CheckEnum;
 import com.shanzhu.beadhouse.common.constant.Constant;
@@ -19,6 +20,9 @@ import com.shanzhu.beadhouse.entity.vo.*;
 import com.shanzhu.beadhouse.service.IntentionService;
 import com.shanzhu.beadhouse.service.common.*;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Isolation;
+import com.shanzhu.beadhouse.common.config.exception.BusinessRuntimeException;
 
 import javax.annotation.Resource;
 import java.math.BigDecimal;
@@ -27,6 +31,9 @@ import java.util.stream.Collectors;
 
 @Service
 public class IntentionServiceImpl implements IntentionService {
+    @Resource private BedLifecycleSupport bedLifecycle;
+    @Resource
+    private com.shanzhu.beadhouse.service.common.AiDataScopeService dataScopeService;
     @Resource
     private CommonFunc commonFunc;
     @Resource
@@ -126,6 +133,7 @@ public class IntentionServiceImpl implements IntentionService {
     }
 
     @Override
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result addIntention(OperateIntentionQuery query) {
         // 根据身份证号获取老人信息
         Elder elderByIdNum = elderFunc.getElderByIdNum(query.getIdNum());
@@ -138,10 +146,16 @@ public class IntentionServiceImpl implements IntentionService {
             elderMapper.insert(elder);
         } else {
             // 判断该老人状态
-            elderFunc.checkIntention(elderByIdNum);
+            dataScopeService.assertElderAccess(elderByIdNum.getId());
+            Elder stored = bedLifecycle.lockElder(elderByIdNum.getId());
+            dataScopeService.assertElderAccess(stored.getId());
+            if (!Objects.equals(stored.getIdNum(), query.getIdNum()))
+                throw new BusinessRuntimeException(409, "老人身份信息已改变，请刷新后重试");
+            bedLifecycle.assertState(stored, CheckEnum.CONSULT.getStatus(), CheckEnum.EXIT.getStatus());
             // 封装修改
             Elder elder = BeanUtil.toBean(query, Elder.class);
             elder.setId(elderByIdNum.getId());
+            elder.setCheckFlag(CheckEnum.INTENTION.getStatus());
             // 修改
             elderMapper.updateById(elder);
         }
@@ -150,6 +164,7 @@ public class IntentionServiceImpl implements IntentionService {
 
     @Override
     public Result getIntentById(Long elderId) {
+        dataScopeService.assertElderAccess(elderId);
         // 根据编号获取意向客户
         Elder elder = elderMapper.selectById(elderId);
         // 判断是否为空
@@ -159,11 +174,16 @@ public class IntentionServiceImpl implements IntentionService {
 
     @Override
     public Result getElderLabelById(Long elderId) {
+        dataScopeService.assertElderAccess(elderId);
         return Result.success(labelMapper.listElderLabelById(elderId));
     }
 
     @Override
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result editIntention(OperateIntentionQuery query) {
+        dataScopeService.assertElderAccess(query.getId());
+        bedLifecycle.lockElder(query.getId());
+        dataScopeService.assertElderAccess(query.getId());
         // 验证老人
         elderFunc.checkElder(query.getId(), query.getIdNum());
         // 封装修改
@@ -175,6 +195,7 @@ public class IntentionServiceImpl implements IntentionService {
 
     @Override
     public Result getEditElderLabelById(Long elderId) {
+        dataScopeService.assertElderAccess(elderId);
         // 获取老人标签
         List<GetElderLabelByIdLabelVo> elderLabelList = labelMapper.listElderLabelById(elderId);
         // 获取未被删除的标签分类
@@ -213,12 +234,14 @@ public class IntentionServiceImpl implements IntentionService {
 
     @Override
     public Result editElderLabel(EditElderLabelQuery query) {
+        dataScopeService.assertElderAccess(query.getElderId());
         elderLabelFunc.saveBatchElderLabel(query.getLabelIdList(), query.getElderId());
         return Result.success();
     }
 
     @Override
     public Result pageVisitPlan(PageVisitPlanQuery query) {
+        dataScopeService.assertElderAccess(query.getElderId());
         Boolean completeFlag = query.getCompleteFlag();
         // 根据条件获取所有未被删除的回访计划
         List<VisitPlan> visitPlanList = visitPlanFunc.listNotDelVisitPlan(query.getElderId(), completeFlag);
@@ -239,6 +262,7 @@ public class IntentionServiceImpl implements IntentionService {
 
     @Override
     public Result addVisitPlan(AddVisitPlanQuery query) {
+        dataScopeService.assertElderAccess(query.getElderId());
         // 根据标题获取回访计划
         AssertUtil.isNull(visitPlanFunc.getVisitPlanByTitle(query.getElderId(), query.getTitle()), ExceptionEnum.VISIT_PLAN_REPEAT);
         // 初始化回访计划
@@ -251,8 +275,12 @@ public class IntentionServiceImpl implements IntentionService {
 
     @Override
     public Result executeVisitPlan(CompleteVisitPlanQuery query) {
-        // 封装修改
-        VisitPlan visitPlan = BeanUtil.toBean(query, VisitPlan.class);
+        VisitPlan stored = requireVisitPlanAccess(query.getId());
+        // 只更新完成信息，老人关联和其他状态以数据库记录为准。
+        VisitPlan visitPlan = new VisitPlan();
+        visitPlan.setId(stored.getId());
+        visitPlan.setContent(query.getContent());
+        visitPlan.setCompleteDate(Convert.toDate(query.getCompleteDate()));
         // 修改
         visitPlanMapper.updateById(visitPlan);
         return Result.success();
@@ -260,9 +288,10 @@ public class IntentionServiceImpl implements IntentionService {
 
     @Override
     public Result deleteVisitPlan(Long visitPlanId) {
+        VisitPlan stored = requireVisitPlanAccess(visitPlanId);
         // 封装修改
         VisitPlan visitPlan = new VisitPlan();
-        visitPlan.setId(visitPlanId);
+        visitPlan.setId(stored.getId());
         visitPlan.setDelFlag(YesNoEnum.YES.getCode());
         // 修改
         visitPlanMapper.updateById(visitPlan);
@@ -271,6 +300,7 @@ public class IntentionServiceImpl implements IntentionService {
 
     @Override
     public Result pageCommunicationRecord(PageCommunicationRecordQuery query) {
+        dataScopeService.assertElderAccess(query.getElderId());
         // 获取所有未被删除的沟通记录
         List<CommunicationRecord> visitPlanList = communicationRecordFunc.listNotDelCommunicationRecord(query.getElderId());
         // 实体转换
@@ -282,6 +312,7 @@ public class IntentionServiceImpl implements IntentionService {
 
     @Override
     public Result addCommunicationRecord(AddCommunicationRecordQuery query) {
+        dataScopeService.assertElderAccess(query.getElderId());
         // 初始化沟通记录
         CommunicationRecord communicationRecord = BeanUtil.toBean(query, CommunicationRecord.class);
         communicationRecord.setDelFlag(YesNoEnum.NO.getCode());
@@ -292,8 +323,12 @@ public class IntentionServiceImpl implements IntentionService {
 
     @Override
     public Result editCommunicationRecord(EditCommunicationRecordQuery query) {
-        // 封装修改
-        CommunicationRecord communicationRecord = BeanUtil.toBean(query, CommunicationRecord.class);
+        CommunicationRecord stored = requireCommunicationRecordAccess(query.getId());
+        // 只更新沟通内容和日期，禁止请求替换老人关联。
+        CommunicationRecord communicationRecord = new CommunicationRecord();
+        communicationRecord.setId(stored.getId());
+        communicationRecord.setCommunicationRecord(query.getCommunicationRecord());
+        communicationRecord.setRecordDate(Convert.toDate(query.getRecordDate()));
         // 修改
         communicationRecordMapper.updateById(communicationRecord);
         return Result.success();
@@ -301,12 +336,29 @@ public class IntentionServiceImpl implements IntentionService {
 
     @Override
     public Result deleteCommunicationRecord(Long communicationRecordId) {
+        CommunicationRecord stored = requireCommunicationRecordAccess(communicationRecordId);
         // 封装修改
         CommunicationRecord communicationRecord = new CommunicationRecord();
-        communicationRecord.setId(communicationRecordId);
+        communicationRecord.setId(stored.getId());
         communicationRecord.setDelFlag(YesNoEnum.YES.getCode());
         // 修改
         communicationRecordMapper.updateById(communicationRecord);
         return Result.success();
+    }
+
+    private VisitPlan requireVisitPlanAccess(Long id) {
+        AssertUtil.notNull(id, ExceptionEnum.DATA_NOT_EXIST);
+        VisitPlan stored = visitPlanMapper.selectById(id);
+        AssertUtil.notNull(stored, ExceptionEnum.DATA_NOT_EXIST);
+        dataScopeService.assertElderAccess(stored.getElderId());
+        return stored;
+    }
+
+    private CommunicationRecord requireCommunicationRecordAccess(Long id) {
+        AssertUtil.notNull(id, ExceptionEnum.DATA_NOT_EXIST);
+        CommunicationRecord stored = communicationRecordMapper.selectById(id);
+        AssertUtil.notNull(stored, ExceptionEnum.DATA_NOT_EXIST);
+        dataScopeService.assertElderAccess(stored.getElderId());
+        return stored;
     }
 }

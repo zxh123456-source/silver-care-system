@@ -40,7 +40,7 @@
                       <el-button
                         class="bg-blue"
                         type="primary"
-                        icon="Plus"
+                        :icon="Plus"
                         circle
                         style="position: absolute;width: 27.6px;height: 27.6px; top: 6.5px; left: 1.7%;z-index: 1000"
                         @click="openDrawer"
@@ -92,22 +92,14 @@
 </template>
 
 <script lang="ts" setup>
+import { handleRequestFailure } from "@/utils/requestFailure";
 import { reactive, ref } from "vue";
 import dishesListDialog from "./dishesListDialog.vue";
 import { ElMessage, FormInstance, FormRules } from "element-plus";
-import { Delete } from "@element-plus/icons-vue";
-import {
-  integerRule,
-  numberRule,
-  stringRule
-} from "@/utils/formRules";
+import { Delete, Plus } from "@element-plus/icons-vue";
+import { numberRule, stringRule } from "@/utils/formRules";
 import { getCateringSetById } from "@/apis/cateringSet";
-import {
-  arrayDeduplicationByFiled,
-  arrayDeduplicationByObj,
-  arrayPushAllByFiled,
-  initArray
-} from "@/utils/commonUtil";
+import { arrayDeduplicationByFiled, arrayPushAllByFiled, initArray } from "@/utils/commonUtil";
 
 const ruleFormRef = ref<FormInstance | null>(null);
 const dialogVisible = ref(false);
@@ -168,13 +160,13 @@ const formData = ref<any>({
 });
 
 // 添加菜品
-const addDishes = (dishesList: any) => {
+const addDishes = (dishesList: any[]) => {
   // 初始化Array
   formData.value.dishesIdList = initArray(formData.value.dishesIdList);
   formData.value.setDishesVoList = initArray(formData.value.setDishesVoList);
 
   // 传入所有对象
-  dishesList.value.forEach((dishes: any) => {
+  dishesList.forEach((dishes: any) => {
     dishes.name = dishes.typeName;
     formData.value.setDishesVoList.push(dishes);
   });
@@ -231,7 +223,7 @@ const handleSubmit = () => {
         });
       }
     } catch (error) {
-      console.log(error);
+      handleRequestFailure(error);
     }
   });
 };

@@ -26,6 +26,15 @@ public class Reserve extends BaseEntity {
      */
     private Long elderId;
 
+    public static final String ACTIVE = "ACTIVE";
+    public static final String REFUNDED = "REFUNDED";
+    public static final String CONVERTED = "CONVERTED";
+    public static final String EXPIRED = "EXPIRED";
+
+    /** Immutable bed snapshot; old refunded records may have no recoverable bed. */
+    private Long bedId;
+    private String state;
+
     /**
      * 销售人员编号
      */

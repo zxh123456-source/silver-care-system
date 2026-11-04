@@ -2,6 +2,7 @@ from pathlib import Path
 
 from app.retrieval import HybridRetriever, tokenize
 from app.store import JsonDocumentStore
+from app.protocol import canonical_payload_hash
 
 
 def test_chinese_hybrid_retrieval_returns_grounded_chunk() -> None:
@@ -33,8 +34,10 @@ def test_chinese_hybrid_retrieval_returns_grounded_chunk() -> None:
 
 def test_store_replaces_document_version(tmp_path: Path) -> None:
     store = JsonDocumentStore(tmp_path / "documents.json")
-    store.upsert_document("policy", "旧制度", "v1", [{"chunk_id": 1, "section_no": 1, "content": "旧内容"}])
-    store.upsert_document("policy", "新制度", "v2", [{"chunk_id": 2, "section_no": 1, "content": "新内容"}])
+    for version, title, text in ((1, "旧制度", "旧内容"), (2, "新制度", "新内容")):
+        rows = [{"chunk_id": version, "section_no": 1, "content": text}]
+        digest = canonical_payload_hash("policy", title, f"v{version}", rows, "UPSERT")
+        store.apply_sync("policy", version, "UPSERT", digest, title, f"v{version}", rows)
 
     chunks = store.all_chunks()
 

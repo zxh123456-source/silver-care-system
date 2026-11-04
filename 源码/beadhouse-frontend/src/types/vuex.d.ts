@@ -1,5 +1,5 @@
 // vuex.d.ts
-import { Store, Module } from 'vuex'
+import { Store } from 'vuex'
 import { type IStoreType } from './store/types'
 
 // 模块扩展

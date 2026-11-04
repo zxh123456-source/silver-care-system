@@ -27,9 +27,13 @@ import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Isolation;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.annotation.Resource;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -69,14 +73,13 @@ public class AiPolicyServiceImpl implements AiPolicyService {
     private AiMetricRecorder metricRecorder;
 
     @Override
-    @Transactional
+    @Transactional(isolation=Isolation.READ_COMMITTED)
     public Result importPolicy(PolicyImportQuery query) {
         if (query == null || blank(query.getTitle()) || blank(query.getSource()) || blank(query.getContent())) {
             return Result.error(400, "制度标题、来源和正文不能为空");
         }
-        int replaced = policyDocMapper.delete(new QueryWrapper<PolicyDoc>()
-                .eq("title", query.getTitle().trim())
-                .eq("source", query.getSource().trim()));
+        ragSyncService.lockDocument(query.getTitle(),query.getSource());
+        int replaced = policyDocMapper.delete(ragSyncService.exactSource(query.getTitle(),query.getSource()));
         List<String> chunks = splitChunks(query.getContent());
         List<PolicyDoc> insertedDocs = new ArrayList<>();
         int sectionNo = 1;
@@ -153,6 +156,7 @@ public class AiPolicyServiceImpl implements AiPolicyService {
     public Result listDocuments() {
         List<PolicyDoc> docs = policyDocMapper.selectList(new QueryWrapper<PolicyDoc>().orderByAsc("title", "section_no"));
         Map<String, PolicyCatalogVo> catalog = new LinkedHashMap<>();
+        Map<String, List<PolicyDoc>> documentChunks = new HashMap<>();
         for (PolicyDoc doc : docs) {
             String key = doc.getTitle() + "\u0000" + doc.getSource();
             PolicyCatalogVo item = catalog.get(key);
@@ -162,10 +166,19 @@ public class AiPolicyServiceImpl implements AiPolicyService {
                 item.setSource(doc.getSource());
                 item.setSectionCount(0);
                 catalog.put(key, item);
+                documentChunks.put(key, new ArrayList<>());
             }
             item.setSectionCount(item.getSectionCount() + 1);
+            documentChunks.get(key).add(doc);
+        }
+        Map<String, Integer> hashCounts = new HashMap<>();
+        for (Map.Entry<String, PolicyCatalogVo> entry : catalog.entrySet()) {
+            String hash = contentHash(documentChunks.get(entry.getKey()));
+            entry.getValue().setContentHash(hash);
+            hashCounts.put(hash, hashCounts.getOrDefault(hash, 0) + 1);
         }
         for (PolicyCatalogVo item : catalog.values()) {
+            item.setDuplicateCount(hashCounts.get(item.getContentHash()) - 1);
             PolicyRagSync sync = ragSyncService.find(ragSyncService.documentKey(item.getTitle(), item.getSource()));
             item.setRagStatus(sync == null ? "NOT_SYNCED" : sync.getStatus());
             item.setRagAttemptCount(sync == null ? 0 : sync.getAttemptCount());
@@ -174,11 +187,36 @@ public class AiPolicyServiceImpl implements AiPolicyService {
         return Result.success(new ArrayList<>(catalog.values()));
     }
 
+    private String contentHash(List<PolicyDoc> chunks) {
+        chunks.sort(Comparator.comparing(PolicyDoc::getSectionNo, Comparator.nullsLast(Comparator.naturalOrder())));
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            for (PolicyDoc chunk : chunks) {
+                // Keep interior whitespace and chunk boundaries; normalize only CRLF and trailing whitespace.
+                String text = nullToEmpty(chunk.getContent()).replace("\r\n", "\n");
+                int end = text.length();
+                while (end > 0 && Character.isWhitespace(text.charAt(end - 1))) end--;
+                byte[] bytes = text.substring(0, end).getBytes(StandardCharsets.UTF_8);
+                for (int shift = 24; shift >= 0; shift -= 8) digest.update((byte) (bytes.length >>> shift));
+                digest.update(bytes);
+            }
+            StringBuilder hash = new StringBuilder(64);
+            for (byte value : digest.digest()) {
+                hash.append(Character.forDigit((value >>> 4) & 15, 16));
+                hash.append(Character.forDigit(value & 15, 16));
+            }
+            return hash.toString();
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
+    }
+
     @Override
-    @Transactional
+    @Transactional(isolation=Isolation.READ_COMMITTED)
     public Result deleteDocument(String title, String source) {
         if (blank(title) || blank(source)) return Result.error(400, "制度标题和来源不能为空");
-        int count = policyDocMapper.delete(new QueryWrapper<PolicyDoc>().eq("title", title).eq("source", source));
+        ragSyncService.lockDocument(title,source);
+        int count = policyDocMapper.delete(ragSyncService.exactSource(title,source));
         String documentKey = ragSyncService.enqueueDelete(title, source);
         auditRecorder.record("制度知识库", "删除制度", "policy_doc", null,
                 "删除片段=" + count + "，文档键=" + shortKey(documentKey));

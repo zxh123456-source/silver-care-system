@@ -1,8 +1,8 @@
 <template>
   <div class="container789">
 
-    <div style="width: 25%; display: flex;background-color: white; ">
-      <div style="flex: 1;width: 100%;padding: 30px;display: flex;flex-direction: column;justify-content: center;" >
+    <div style="width: 25%; min-width: min(360px, calc(100% - 32px)); display: flex;background-color: white; ">
+      <div style="flex: 1;width: 100%;padding: min(30px, 5vw);display: flex;flex-direction: column;justify-content: center;" >
         <div style="text-align: center; font-size: 30px; margin-bottom: 30px; color: #000000;">养 老 院 管 理 系 统</div>
         <el-form
           :model="formData"
@@ -44,7 +44,7 @@
             <div class="password-set">
               <el-button
                 link
-                @click="this.$emit('forgetPassHandle')"
+                @click="$emit('forgetPassHandle')"
               >
                 忘记密码
               </el-button>
@@ -70,14 +70,13 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, watch } from 'vue'
+import { reactive, ref } from 'vue'
 import { useRenderIcon } from '@/hooks/useIcons'
 import { ReImageVerify } from '@/components/ReImageVerify'
 import { FormInstance, FormRules, ElMessage } from 'element-plus'
 import { useRouter } from 'vue-router'
 import store from '@/store'
 import { isNotAccount } from '@/utils/is'
-import { initRoutes } from '@/router/utils'
 const router = useRouter()
 
 const imgCode = ref('')
@@ -93,8 +92,8 @@ const loading = ref(false)
 
 const handleLogin = async (formRef: FormInstance | null) => {
   loading.value = true
-  if (!formRef) return
-  formRef.validate((valid, fields) => {
+  if (!formRef) { loading.value = false; return }
+  formRef.validate((valid) => {
     if (valid) {
       //单独校验图形验证码
       if (imgCode.value == formData.value.verifyCode) {
@@ -123,6 +122,8 @@ const handleLogin = async (formRef: FormInstance | null) => {
               })
             }
           })
+          .catch(() => { /* Authentication errors are displayed by the shared HTTP handler. */ })
+          .finally(() => { loading.value = false })
       } else {
         ElMessage({
           message: '验证码错误',
@@ -134,7 +135,7 @@ const handleLogin = async (formRef: FormInstance | null) => {
       }
     } else {
       loading.value = false
-      return fields
+      return
     }
   })
 }
@@ -186,7 +187,7 @@ const loginRules = reactive<FormRules>({
 </script>
 
 <style scoped>
-::v-deep .el-input-group__append {
+:deep(.el-input-group__append) {
   padding: 0;
 }
 

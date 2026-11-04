@@ -1,7 +1,9 @@
+import type { ResourceSession } from "@/utils/authResource";
+import { captureResourceSession, checkedResourceSessionConfig } from "@/utils/authResource";
 import { http } from "@/utils";
 
-export function pageAccessibleElders(data: { pageNum: number; pageSize: number; name?: string; phone?: string }) {
-  return http.get("/api/ai/scope/elders", { params: data });
+export function pageAccessibleElders(data: { pageNum: number; pageSize: number; name?: string; phone?: string }, session: ResourceSession = captureResourceSession()) {
+  return http.get("/api/ai/scope/elders", { ...checkedResourceSessionConfig(session), params: data });
 }
 
 export function listElderAssignments() {

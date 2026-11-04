@@ -4,20 +4,14 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.shanzhu.beadhouse.entity.po.PolicyRagSync;
 import org.apache.ibatis.annotations.Param;
 
-import java.util.List;
-
 public interface PolicyRagSyncMapper extends BaseMapper<PolicyRagSync> {
-    int upsertDesired(@Param("documentKey") String documentKey,
-                      @Param("title") String title,
-                      @Param("source") String source,
-                      @Param("desiredAction") String desiredAction,
-                      @Param("revision") String revision);
-    List<PolicyRagSync> listDue(@Param("limit") Integer limit);
-    int markSynced(@Param("documentKey") String documentKey,
-                   @Param("desiredAction") String desiredAction,
-                   @Param("revision") String revision);
-    int markFailed(@Param("documentKey") String documentKey,
-                   @Param("desiredAction") String desiredAction,
-                   @Param("revision") String revision,
-                   @Param("errorCode") String errorCode);
+    int initialize(@Param("key") String key,@Param("title") String title,@Param("source") String source,@Param("actor") Long actor);
+    PolicyRagSync lockDocument(@Param("key") String key);
+    PolicyRagSync lockDue(@Param("key") String key);
+    int stage(@Param("row") PolicyRagSync row,@Param("previousVersion") long previousVersion,@Param("actor") Long actor);
+    int claim(@Param("id") Long id,@Param("owner") String owner,@Param("seconds") int seconds);
+    int validClaim(@Param("claim") PolicyRagSync claim);
+    int markSynced(@Param("claim") PolicyRagSync claim);
+    int markFailed(@Param("claim") PolicyRagSync claim,@Param("errorCode") String errorCode);
+    int systemAudit(@Param("id") Long id,@Param("detail") String detail);
 }

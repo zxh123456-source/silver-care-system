@@ -94,7 +94,7 @@
                 >
                   <el-option
                     clearable
-                    :label="item.name"
+                    :label="item.label"
                     :value="item.value"
                     v-for="item in auditResultList"
                     :key="item.value"
@@ -132,6 +132,7 @@
 </template>
 
 <script lang="ts" setup>
+import { handleRequestFailure } from "@/utils/requestFailure";
 import { reactive, ref } from "vue";
 import { ElMessage, FormInstance, FormRules } from "element-plus";
 import { getElderFeeById, IAuditResultList } from "@/apis/retreatAudit";
@@ -202,7 +203,7 @@ const handleSubmit = () => {
         });
       }
     } catch (error) {
-      console.log(error);
+      handleRequestFailure(error);
     }
   });
 };

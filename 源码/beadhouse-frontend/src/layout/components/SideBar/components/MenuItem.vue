@@ -52,7 +52,7 @@
 </template>
 
 <script setup lang="ts">
-import { defineProps, ref } from 'vue'
+import { ref } from 'vue'
 import { IRoute } from '@/router/types'
 import router from '@/router'
 

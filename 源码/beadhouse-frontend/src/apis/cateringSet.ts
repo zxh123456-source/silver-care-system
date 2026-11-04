@@ -20,7 +20,7 @@ interface IGetCateringSetById {
 // 分页查询餐饮套餐
 export async function pageCateringSetByKey(data: IPageCateringSetByKey) {
   // 因为后台返回的字段与前端表单数据的prop不一样，但是组件封装是需要一样的，所以请求前增加一些这两个字段
-  Reflect.has(data, 'name') ? (data.setName = data.name) : ''
+  if (Reflect.has(data, 'name')) data.setName = data.name
   return http.get("/api/cateringSet/pageCateringSetByKey", {
     params: {
       ...data

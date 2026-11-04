@@ -18,7 +18,7 @@ interface IGetRoomTypeById {
 // 分页查询房间类型
 export async function pageRoomTypeByKey(data: IPageRoomTypeByKey) {
   // 因为后台返回的字段与前端表单数据的prop不一样，但是组件封装是需要一样的，所以请求前增加一些这两个字段
-  Reflect.has(data, "name") ? (data.roomTypeName = data.name) : "";
+  if (Reflect.has(data, "name")) data.roomTypeName = data.name;
   return http.get("/api/roomType/pageRoomTypeByKey", {
     params: {
       ...data

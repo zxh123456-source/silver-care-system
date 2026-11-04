@@ -37,6 +37,7 @@ import java.util.stream.Collectors;
 
 @Component
 public class AiDataScopeService {
+    @Resource private ElderPageService elderPages;
     @Resource
     private AuthorityAssert authorityAssert;
     @Resource
@@ -46,13 +47,18 @@ public class AiDataScopeService {
     @Resource
     private StaffMapper staffMapper;
     @Resource
-    private CommonFunc commonFunc;
-    @Resource
     private PageUtil pageUtil;
     @Resource
     private AiAuditRecorder auditRecorder;
     @Value("${ai.data-scope.admin-role-id:1}")
     private long adminRoleId;
+
+    /** Null means administrator. Staff identity is never accepted from a request DTO. */
+    public Long queryStaffId() {
+        if (authorityAssert.getLoginUserInfo() == null)
+            throw new BusinessRuntimeException(403, "需要登录后访问老人数据");
+        return isAdmin() ? null : authorityAssert.getLoginUserId();
+    }
 
     public boolean isAdmin() {
         LoginUserVo user = authorityAssert.getLoginUserInfo();
@@ -64,29 +70,24 @@ public class AiDataScopeService {
 
     public void assertElderAccess(Long elderId) {
         if (elderId == null) throw new BusinessRuntimeException(400, "老人编号不能为空");
-        if (isAdmin()) return;
-        Long staffId = authorityAssert.getLoginUserId();
-        Long count = assignmentMapper.selectCount(new QueryWrapper<ElderStaffAssignment>()
-                .eq("elder_id", elderId).eq("staff_id", staffId).eq("active", YesNoEnum.YES.getCode()));
-        if (count == null || count == 0) throw new BusinessRuntimeException(403, "无权访问该老人数据");
+        Long staffId = queryStaffId();
+        if (staffId == null) return;
+        if (elderMapper.listAccessibleElderIds(staffId, Collections.singleton(elderId)).isEmpty())
+            throw new BusinessRuntimeException(403, "无权访问该老人数据");
     }
 
     public Set<Long> allowedElderIds(Collection<Long> candidateIds) {
         if (candidateIds == null || candidateIds.isEmpty()) return Collections.emptySet();
         Set<Long> candidates = new HashSet<>(candidateIds);
-        if (isAdmin()) return candidates;
-        List<ElderStaffAssignment> assignments = assignmentMapper.selectList(new QueryWrapper<ElderStaffAssignment>()
-                .eq("staff_id", authorityAssert.getLoginUserId())
-                .eq("active", YesNoEnum.YES.getCode())
-                .in("elder_id", candidates));
-        return assignments.stream().map(ElderStaffAssignment::getElderId).collect(Collectors.toSet());
+        Long staffId = queryStaffId();
+        if (staffId == null) return candidates;
+        return new HashSet<>(elderMapper.listAccessibleElderIds(staffId, candidates));
     }
 
     public Set<Long> currentAssignedElderIds() {
-        if (isAdmin()) return Collections.emptySet();
-        return assignmentMapper.selectList(new QueryWrapper<ElderStaffAssignment>()
-                .eq("staff_id", authorityAssert.getLoginUserId()).eq("active", YesNoEnum.YES.getCode()))
-                .stream().map(ElderStaffAssignment::getElderId).collect(Collectors.toSet());
+        Long staffId = queryStaffId();
+        if (staffId == null) return Collections.emptySet();
+        return new HashSet<>(elderMapper.listAccessibleElderIds(staffId, null));
     }
 
     public <T> void applyElderScope(QueryWrapper<T> query, String elderColumn) {
@@ -97,17 +98,9 @@ public class AiDataScopeService {
     }
 
     public Result pageAccessibleElders(PageSearchElderByKeyQuery query) {
-        if (query.getPageNum() == null || query.getPageNum() < 1) query.setPageNum(1);
-        if (query.getPageSize() == null || query.getPageSize() < 1) query.setPageSize(10);
-        query.setPageSize(Math.min(query.getPageSize(), 100));
-        List<PageSearchElderByKeyVo> elders = commonFunc.listPageElderByKey(query,
-                Arrays.asList(CheckEnum.ENTER.getStatus(), CheckEnum.EXIT_AUDIT.getStatus()));
-        if (!isAdmin()) {
-            Set<Long> allowed = allowedElderIds(elders.stream().map(PageSearchElderByKeyVo::getId).collect(Collectors.toList()));
-            elders = elders.stream().filter(item -> allowed.contains(item.getId())).collect(Collectors.toList());
-        }
-        PageResult<PageSearchElderByKeyVo> result = pageUtil.packPageResultData(elders, query.getPageNum(), query.getPageSize());
-        return Result.success(result);
+        return Result.success(elderPages.selector(query,
+                Arrays.asList(CheckEnum.ENTER.getStatus(),CheckEnum.EXIT_AUDIT.getStatus()),
+                queryStaffId(),false,false));
     }
 
     public Result assignments() {

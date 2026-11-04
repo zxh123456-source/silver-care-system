@@ -8,7 +8,6 @@
 </template>
 
 <script setup lang="ts">
-import todaySold from './todaySold.vue'
 import monthPerformance from './monthPerformance.vue'
 import trend from './trend.vue'
 import SoldBed from './soldBed.vue'

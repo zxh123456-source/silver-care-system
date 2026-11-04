@@ -53,6 +53,8 @@ public class AiMedicationServiceImpl implements AiMedicationService {
     private AuthorityAssert authorityAssert;
     @Resource
     private AiDataScopeService dataScopeService;
+    @Resource
+    private com.shanzhu.beadhouse.service.common.CareAlertService careAlerts;
 
     @Override
     public Result addPlan(MedicationPlanQuery query) {
@@ -135,7 +137,7 @@ public class AiMedicationServiceImpl implements AiMedicationService {
         }
         if (!ALLOWED_STATUS.contains(query.getStatus())) return Result.error(400, "执行状态不合法");
         if ("SKIPPED".equals(query.getStatus()) && blank(query.getNote())) return Result.error(400, "未执行时必须填写原因");
-        MedicationPlan plan = planMapper.selectById(query.getPlanId());
+        MedicationPlan plan = planMapper.lockById(query.getPlanId());
         if (plan == null) return Result.error(400, "用药计划不存在");
         dataScopeService.assertElderAccess(plan.getElderId());
         Elder elder = elderMapper.selectById(plan.getElderId());
@@ -155,6 +157,7 @@ public class AiMedicationServiceImpl implements AiMedicationService {
         execution.setNote(query.getNote());
         Long operatorId = authorityAssert.getLoginUserInfo() == null ? 1L : authorityAssert.getLoginUserId();
         executionMapper.upsertExecution(execution, operatorId);
+        careAlerts.medication(plan, execution);
         auditRecorder.record("用药执行", "登记用药执行", "medication_execution", execution.getId(),
                 "状态=" + query.getStatus());
         return Result.success(execution);

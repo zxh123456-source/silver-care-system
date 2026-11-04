@@ -22,7 +22,7 @@
                     <el-button
                       @click="openDrawer"
                       :icon="Plus"
-                      :style="{cursor: (drawerProps.title !== '新增' ? not-allowed : cursor)}"
+                      :style="{cursor: (drawerProps.title !== '新增' ? 'not-allowed' : 'pointer')}"
                       :disabled="drawerProps.title !== '新增'"
                     />
                   </template>
@@ -126,9 +126,10 @@
 </template>
 
 <script lang="ts" setup>
-import { onMounted, reactive, ref, toRefs } from "vue";
+import { handleRequestFailure } from "@/utils/requestFailure";
+import { reactive, ref } from "vue";
 import elderListDialog from "@/components/elderListDialog/index.vue";
-import { ElMessage, ElMessageBox, FormInstance, FormRules } from "element-plus";
+import { ElMessage, FormInstance, FormRules } from "element-plus";
 import { Plus } from "@element-plus/icons-vue";
 import {
   phoneRule,
@@ -264,7 +265,7 @@ const handleSubmit = () => {
         });
       }
     } catch (error) {
-      console.log(error);
+      handleRequestFailure(error);
     }
   });
 };

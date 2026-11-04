@@ -17,7 +17,7 @@ interface IGetSourceById {
 // 分页查询来源渠道
 export async function pageSourceByKey(data: IPageSourceByKey) {
   // 因为后台返回的字段与前端表单数据的prop不一样，但是组件封装是需要一样的，所以请求前增加一些这两个字段
-  Reflect.has(data, "name") ? (data.sourceName = data.name) : "";
+  if (Reflect.has(data, "name")) data.sourceName = data.name;
   return http.get("/api/source/pageSourceByKey", {
     params: {
       ...data

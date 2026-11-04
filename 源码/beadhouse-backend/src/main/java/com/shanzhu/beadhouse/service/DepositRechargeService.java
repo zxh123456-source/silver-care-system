@@ -29,4 +29,8 @@ public interface DepositRechargeService {
      * @return
      */
     Result recharge(RechargeQuery rechargeQuery);
+
+    Result getRechargeReceipt(Long elderId, String requestId);
+
+    Result pageRechargeLedger(Long elderId, Integer pageNum, Integer pageSize);
 }

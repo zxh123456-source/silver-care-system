@@ -27,15 +27,15 @@ public class ActiveParticipantFunc extends ServiceImpl<ActiveParticipantMapper, 
      * @param editFlag
      */
     public void saveBatchActiveParticipant(List<Long> elderIdList, Long activeId, Boolean editFlag) {
+        // Validate/normalize before touching the old participant set.
+        elderIdList = elderIdList.stream()
+                .distinct()
+                .collect(Collectors.toList());
         // 删除原有活动参与者
         if (editFlag) {
             activeParticipantMapper.delete(new LambdaQueryWrapper<ActiveParticipant>()
                     .eq(ActiveParticipant::getActiveId, activeId));
         }
-        // 过滤重复值
-        elderIdList = elderIdList.stream()
-                .distinct()
-                .collect(Collectors.toList());
         // 封装活动参与实体
         List<ActiveParticipant> activeParticipantList = new ArrayList<>();
         elderIdList.forEach(elderId -> {
@@ -45,6 +45,6 @@ public class ActiveParticipantFunc extends ServiceImpl<ActiveParticipantMapper, 
             activeParticipantList.add(activeParticipant);
         });
         // 批量插入活动参与者
-        saveBatch(activeParticipantList);
+        if (!activeParticipantList.isEmpty()) saveBatch(activeParticipantList);
     }
 }

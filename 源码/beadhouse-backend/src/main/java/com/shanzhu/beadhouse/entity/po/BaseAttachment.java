@@ -53,5 +53,11 @@ public class BaseAttachment extends BaseEntity {
      */
     private String delFlag;
 
+    /** LEGACY is deliberately not an unclaimed upload. Bindings never return to DRAFT. */
+    private String bindingState;
+
+    /** Null only for legacy files whose media type has not yet been verified. */
+    private String mediaType;
+
 
 }

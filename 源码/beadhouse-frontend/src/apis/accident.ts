@@ -1,3 +1,5 @@
+import type { ResourceSession } from "@/utils/authResource";
+import { captureResourceSession, checkedResourceSessionConfig } from "@/utils/authResource";
 import { http } from "@/utils";
 import { IPageSearchElderByKey } from "@/apis/bookManage";
 
@@ -38,8 +40,8 @@ export async function pageAccidentByKey(data: IPageAccidentByKey) {
 }
 
 // 分页搜索老人
-export async function pageSearchElderByKey(data: IPageSearchElderByKey) {
-  return http.get("/api/accident/pageSearchElderByKey", {
+export function pageSearchElderByKey(data: IPageSearchElderByKey, session: ResourceSession = captureResourceSession()) {
+  return http.get("/api/accident/pageSearchElderByKey", { ...checkedResourceSessionConfig(session),
     params: {
       ...data
     }

@@ -56,7 +56,7 @@ export const store = {
   actions: {
     //登录
     async actionLogin(
-      { commit, state }: ActionContext<IAppState, IRootState>,
+      { commit }: ActionContext<IAppState, IRootState>,
       data: any
     ) {
       const res: any = await getLogin(data)
@@ -81,7 +81,7 @@ export const store = {
       commit('setAuth', true)
     },
     // 点击登出
-    logout({ commit, state }: ActionContext<IAppState, IRootState>) {
+    logout({ commit }: ActionContext<IAppState, IRootState>) {
       commit('clearStore')
       localStorage.clear()
       clearRoutes()

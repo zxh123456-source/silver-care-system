@@ -37,7 +37,7 @@ public class OperateCheckContractQuery {
     private String startDate;
     @ApiModelProperty(value = "合同结束日期", required = true, example = "2022-12-24")
     private String endDate;
-    @ApiModelProperty(value = "紧急联系人", required = true, example = "[{'name':'张三','phone':'13547564867','email':'3498579@qq.com','relation':'父子','receiveFlag':'Y'}]")
+    @ApiModelProperty(value = "紧急联系人", required = true, example = "[{\"name\":\"张三\",\"phone\":\"13547564867\",\"email\":\"3498579@qq.com\",\"relation\":\"父子\",\"receiveFlag\":\"Y\"}]")
     private List<OperateEmergencyContactQuery> operateEmergencyContactQueryList;
 
     @Data

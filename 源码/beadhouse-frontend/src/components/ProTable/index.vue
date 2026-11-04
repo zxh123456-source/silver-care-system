@@ -46,8 +46,14 @@
           </div>
         </div>
       </div>
+      <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon class="mb-2">
+        <template #default>
+          <el-button size="small" :disabled="loading" @click="getTableList">重新加载</el-button>
+        </template>
+      </el-alert>
       <!-- 表格主体 -->
       <el-table
+        v-loading="loading"
         ref="tableRef"
         v-bind="$attrs"
         :data="tableData"
@@ -57,7 +63,7 @@
       >
         <!-- 默认插槽 -->
         <slot></slot>
-        <template v-for="item in tableColumns" :key="item">
+        <template v-for="(item, index) in tableColumns" :key="item.prop || item.type || index">
           <!-- selection || index -->
           <el-table-column
             v-bind="item"
@@ -118,18 +124,13 @@
 </template>
 
 <script setup lang="ts" name="ProTable">
-import { ref, watch, computed, provide, onMounted } from 'vue'
+import { ref, watch, provide, onMounted, type Ref } from 'vue'
 import { useTable } from '@/hooks/useTable'
 import { BreakPoint } from '@/components/Grid/interface'
 import { ColumnProps } from '@/components/ProTable/interface'
-import { ElTable, TableProps } from 'element-plus'
-import { Refresh, Printer, Operation, Search } from '@element-plus/icons-vue'
-import {
-  filterEnum,
-  formatValue,
-  handleProp,
-  handleRowAccordingToProp
-} from '@/utils/util'
+import { TableInstance, TableProps } from 'element-plus'
+import { Refresh, Operation, Search } from '@element-plus/icons-vue'
+import { handleProp } from '@/utils/util'
 import SearchForm from '@/components/SearchForm/index.vue'
 import Pagination from './components/Pagination.vue'
 import ColSetting from './components/ColSetting.vue'
@@ -169,7 +170,7 @@ const props = withDefaults(defineProps<ProTableProps>(), {
 const isShowSearch = ref(true)
 
 // 表格 DOM 元素
-const tableRef = ref<InstanceType<typeof ElTable>>()
+const tableRef = ref<TableInstance>()
 
 // 表格多选 Hooks
 const { selectionChange, selectedList, selectedListIds, isSelected } =
@@ -178,6 +179,8 @@ const { selectionChange, selectedList, selectedListIds, isSelected } =
 // 表格操作 Hooks
 const {
   tableData,
+  loading,
+  error,
   pageable,
   searchParam,
   searchInitParam,
@@ -203,7 +206,7 @@ onMounted(() => props.requestAuto && getTableList())
 watch(() => props.initParam, getTableList, { deep: true })
 
 // 接收 columns 并设置为响应式
-const tableColumns = ref<ColumnProps[]>(props.columns)
+const tableColumns = ref(props.columns) as Ref<ColumnProps[]>
 
 // 定义 enumMap 存储 enum 值（避免异步请求无法格式化单元格内容 || 无法填充搜索下拉选择）
 const enumMap = ref(new Map<string, { [key: string]: any }[]>())
@@ -237,7 +240,7 @@ const flatColumnsFunc = (
 }
 
 // flatColumns
-const flatColumns = ref<ColumnProps[]>()
+const flatColumns = ref() as Ref<ColumnProps[]>
 flatColumns.value = flatColumnsFunc(tableColumns.value)
 // 过滤需要搜索的配置项
 const searchColumns = flatColumns.value.filter(item => item.search?.el)
@@ -267,56 +270,6 @@ const colSetting = tableColumns.value!.filter(
     item.prop !== 'operation'
 )
 const openColSetting = () => colRef.value.openColSetting()
-
-//不需要打印可以把以下方法删除（目前数据处理比较复杂 201-238）
-// 处理打印数据（把后台返回的值根据 enum 做转换）
-const printData = computed(() => {
-  const printDataList = JSON.parse(
-    JSON.stringify(
-      selectedList.value.length ? selectedList.value : tableData.value
-    )
-  )
-  // 找出需要转换数据的列（有 enum || 多级 prop && 需要根据 enum 格式化）
-  const needTransformCol = flatColumns.value!.filter(
-    item =>
-      (item.enum || (item.prop && item.prop.split('.').length > 1)) &&
-      item.isFilterEnum
-  )
-  needTransformCol.forEach(colItem => {
-    printDataList.forEach((tableItem: { [key: string]: any }) => {
-      tableItem[handleProp(colItem.prop!)] =
-        colItem.prop!.split('.').length > 1 && !colItem.enum
-          ? formatValue(handleRowAccordingToProp(tableItem, colItem.prop!))
-          : filterEnum(
-              handleRowAccordingToProp(tableItem, colItem.prop!),
-              enumMap.value.get(colItem.prop!),
-              colItem.fieldNames
-            )
-      for (const key in tableItem) {
-        if (tableItem[key] === null)
-          tableItem[key] = formatValue(tableItem[key])
-      }
-    })
-  })
-  return printDataList
-})
-
-// 打印表格数据（💥 多级表头数据打印时，只能扁平化成一维数组，printJs 不支持多级表头打印）
-// const handlePrint = () => {
-// 	const header = `<div style="text-align: center"><h2>${props.title}</h2></div>`;
-// 	const gridHeaderStyle = "border: 1px solid #ebeef5;height: 45px;color: #232425;text-align: center;background-color: #fafafa;";
-// 	const gridStyle = "border: 1px solid #ebeef5;height: 40px;color: #494b4e;text-align: center";
-// 	printJS({
-// 		printable: printData.value,
-// 		header: props.title && header,
-// 		properties: flatColumns
-// 			.value!.filter(item => !["selection", "index", "expand"].includes(item.type!) && item.isShow && item.prop !== "operation")
-// 			.map((item: ColumnProps) => ({ field: handleProp(item.prop!), displayName: item.label })),
-// 		type: "json",
-// 		gridHeaderStyle,
-// 		gridStyle
-// 	});
-// };
 
 // 暴露给父组件的参数和方法(外部需要什么，都可以从这里暴露出去)
 defineExpose({

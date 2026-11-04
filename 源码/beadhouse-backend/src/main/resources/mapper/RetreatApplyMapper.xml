@@ -16,6 +16,7 @@
         LEFT JOIN bed b ON b.id = e.bed_id
         <where>
             e.id IS NOT NULL
+            <include refid="com.shanzhu.beadhouse.dao.mapper.ElderMapper.assignmentScope"/>
             <if test="keyQuery.elderName != null and keyQuery.elderName != '' and keyQuery.elderName != 'null'">
                 AND e.name LIKE concat('%', #{keyQuery.elderName,jdbcType=VARCHAR}, '%')
             </if>
@@ -46,6 +47,7 @@
         <where>
             ra.apply_flag = '待审核'
             AND e.check_flag = '退住审核'
+            <include refid="com.shanzhu.beadhouse.dao.mapper.ElderMapper.assignmentScope"/>
             <if test="keyQuery.elderName != null and keyQuery.elderName != '' and keyQuery.elderName != 'null'">
                 AND e.name LIKE concat('%', #{keyQuery.elderName,jdbcType=VARCHAR}, '%')
             </if>

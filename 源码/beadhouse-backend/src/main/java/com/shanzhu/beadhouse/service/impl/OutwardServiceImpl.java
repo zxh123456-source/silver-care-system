@@ -31,6 +31,8 @@ import java.util.stream.Collectors;
 @Service
 public class OutwardServiceImpl implements OutwardService {
     @Resource
+    private com.shanzhu.beadhouse.service.common.AiDataScopeService dataScopeService;
+    @Resource
     private DepositRechargeService depositRechargeService;
     @Resource
     private OutwardMapper outwardMapper;
@@ -51,7 +53,7 @@ public class OutwardServiceImpl implements OutwardService {
         Date startTime = DateUtilWen.getDayStartTime(DateUtilWen.dateStrToDate(query.getStartTime()));
         Date endTime = DateUtilWen.getDayEndTime(DateUtilWen.dateStrToDate(query.getEndTime()));
         // 根据关键字获取外出登记
-        List<PageOutwardByKeyVo> outwardByKeyVoList = outwardMapper.listOutwardByKey(query, startTime, endTime);
+        List<PageOutwardByKeyVo> outwardByKeyVoList = outwardMapper.listOutwardByKey(query, startTime, endTime, dataScopeService.queryStaffId());
         // 封装返回数据
         PageResult<PageOutwardByKeyVo> pageResult = pageUtil.packPageResultData(outwardByKeyVoList, query.getPageNum(), query.getPageSize());
         return Result.success(pageResult);
@@ -59,24 +61,8 @@ public class OutwardServiceImpl implements OutwardService {
 
     @Override
     public Result pageSearchElderByKey(PageSearchElderByKeyQuery query) {
-        List<String> checkFlagList = new ArrayList<>(Arrays.asList(CheckEnum.ENTER.getStatus(), CheckEnum.EXIT_AUDIT.getStatus()));
-        // 根据姓名和联系电话获取入住和退住审核老人列表
-        List<PageSearchElderByKeyVo> pageSearchElderByKeyVoList = commonFunc.listPageElderByKey(query, checkFlagList);
-        // 获取未被删除且未返回的外出登记
-        List<Outward> outwardList = outwardFunc.listNotDelAndNotReturnOutward();
-        // 根据外出登记列表过滤老人
-        pageSearchElderByKeyVoList = pageSearchElderByKeyVoList.stream().filter(pageSearchElderByKeyVo -> {
-            AtomicBoolean existFlag = new AtomicBoolean(false);
-            outwardList.forEach(outward -> {
-                if (Objects.equals(outward.getElderId(), pageSearchElderByKeyVo.getId())) {
-                    existFlag.set(true);
-                }
-            });
-            return !existFlag.get();
-        }).collect(Collectors.toList());
-        // 封装返回数据
-        PageResult<PageSearchElderByKeyVo> pageResult = pageUtil.packPageResultData(pageSearchElderByKeyVoList, query.getPageNum(), query.getPageSize());
-        return Result.success(pageResult);
+        return commonFunc.pageSearchElderByKeyResult(query,
+                Arrays.asList(CheckEnum.ENTER.getStatus(),CheckEnum.EXIT_AUDIT.getStatus()),true,false);
     }
 
     @Override
@@ -91,6 +77,7 @@ public class OutwardServiceImpl implements OutwardService {
 
     @Override
     public Result pageEmergencyContact(PageSearchEmergencyContactQuery query) {
+        dataScopeService.assertElderAccess(query.getElderId());
         // 根据老人编号获取紧急联系人
         List<EmergencyContact> emergencyContactList = emergencyContactMapper.selectList(new LambdaQueryWrapper<EmergencyContact>()
                 .eq(EmergencyContact::getElderId, query.getElderId()));
@@ -103,6 +90,7 @@ public class OutwardServiceImpl implements OutwardService {
 
     @Override
     public Result listContactByElderId(Long elderId) {
+        dataScopeService.assertElderAccess(elderId);
         // 根据老人编号获取紧急联系人
         List<EmergencyContact> emergencyContactList = emergencyContactMapper.selectList(new LambdaQueryWrapper<EmergencyContact>()
                 .eq(EmergencyContact::getElderId, elderId));
@@ -113,6 +101,7 @@ public class OutwardServiceImpl implements OutwardService {
 
     @Override
     public Result addOutward(AddOutwardQuery query) {
+        dataScopeService.assertElderAccess(query.getElderId());
         // 验证是否已外出登记
         List<Outward> outwardList = outwardMapper.selectList(new LambdaQueryWrapper<Outward>()
                 .eq(Outward::getElderId, query.getElderId())
@@ -128,6 +117,9 @@ public class OutwardServiceImpl implements OutwardService {
 
     @Override
     public Result getOutwardById(Long outwardId) {
+        Outward record = outwardMapper.selectById(outwardId);
+        AssertUtil.notNull(record, ExceptionEnum.DATA_NOT_EXIST);
+        dataScopeService.assertElderAccess(record.getElderId());
         // 根据编号获取外出登记
         GetOutwardByIdVo outwardById = outwardMapper.getOutwardById(outwardId);
         // 验证外出登记是否存在
@@ -139,6 +131,7 @@ public class OutwardServiceImpl implements OutwardService {
     public Result delayReturn(DelayReturnQuery query) {
         // 验证外出登记
         Outward outward = outwardFunc.checkOutward(query.getId(), false);
+        dataScopeService.assertElderAccess(outward.getElderId());
         // 封装修改
         outward.setPlanReturnDate(DateUtilWen.dateStrToDate(query.getPlanReturnDate()));
         // 修改
@@ -150,6 +143,7 @@ public class OutwardServiceImpl implements OutwardService {
     public Result recordReturn(RecordReturnQuery query) {
         // 验证外出登记
         Outward outward = outwardFunc.checkOutward(query.getId(), false);
+        dataScopeService.assertElderAccess(outward.getElderId());
         // 验证是否已登记返回
         AssertUtil.isNull(outward.getRealReturnDate(), ExceptionEnum.ALREADY_RETURN);
         // 封装修改
@@ -163,6 +157,7 @@ public class OutwardServiceImpl implements OutwardService {
     public Result deleteOutward(Long outwardId) {
         // 验证外出登记
         Outward outward = outwardFunc.checkOutward(outwardId, true);
+        dataScopeService.assertElderAccess(outward.getElderId());
         // 封装修改
         outward.setDelFlag(YesNoEnum.YES.getCode());
         // 修改

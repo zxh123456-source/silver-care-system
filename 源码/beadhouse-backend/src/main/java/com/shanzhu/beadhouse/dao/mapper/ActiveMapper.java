@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.shanzhu.beadhouse.entity.query.PageActiveByKeyQuery;
 import com.shanzhu.beadhouse.entity.vo.PageActiveByKeyVo;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 
 import java.util.Date;
 import java.util.List;
@@ -18,6 +19,9 @@ import java.util.List;
  * @date: 2024-08-101
  */
 public interface ActiveMapper extends BaseMapper<Active> {
+    @Select("SELECT * FROM active WHERE id = #{id} FOR UPDATE")
+    Active selectByIdForUpdate(@Param("id") Long id);
+
     /**
      * 根据关键词查询活动
      *
@@ -28,5 +32,6 @@ public interface ActiveMapper extends BaseMapper<Active> {
      */
     List<PageActiveByKeyVo> listActiveByKey(@Param("keyQuery") PageActiveByKeyQuery keyQuery,
                                             @Param("startTime") Date startTime,
-                                            @Param("endTime") Date endTime);
+                                            @Param("endTime") Date endTime,
+                                            @Param("scopeStaffId") Long scopeStaffId);
 }

@@ -18,6 +18,11 @@ public class PolicyRagSync extends BaseEntity {
     private String desiredAction;
     private String revision;
     private String status;
+    private Long desiredVersion;
+    private String payloadJson;
+    private String leaseOwner;
+    private Long leaseToken;
+    private Date leaseUntil;
     private Integer attemptCount;
     private Date nextRetryTime;
     private String lastErrorCode;

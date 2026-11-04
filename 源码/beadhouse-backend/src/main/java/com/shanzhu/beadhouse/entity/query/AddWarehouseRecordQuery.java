@@ -17,7 +17,7 @@ public class AddWarehouseRecordQuery {
     private String source;
     @ApiModelProperty(value = "入库时间", required = true, example = "2022-12-13")
     private String warehouseDate;
-    @ApiModelProperty(value = "入库物资列表", required = true, example = "[{'materialId':1,'warehouseNum':10,'productDate':'2022-12-12','expireDate':'2022-12-13'}]")
+    @ApiModelProperty(value = "入库物资列表", required = true, example = "[{\"materialId\":1,\"warehouseNum\":10,\"productDate\":\"2022-12-12\",\"expireDate\":\"2022-12-13\"}]")
     private List<AddWarehouseMaterialQuery> warehouseMaterialQueryList;
 
     @Data

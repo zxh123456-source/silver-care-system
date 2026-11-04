@@ -89,23 +89,12 @@
 </template>
 
 <script lang="ts" setup>
+import { handleRequestFailure } from "@/utils/requestFailure";
 import { reactive, ref } from "vue";
-import { ElMessage, ElMessageBox, FormInstance, FormRules } from "element-plus";
-import { Plus } from "@element-plus/icons-vue";
+import { ElMessage, FormInstance, FormRules } from "element-plus";
 
-import {
-  idNumRule,
-  integerRule,
-  numberRule,
-  phoneRule,
-  stringRule
-} from "@/utils/formRules";
+import { integerRule, numberRule, stringRule } from "@/utils/formRules";
 
-import {
-  addReserve,
-  getBuildTree, getReserveById, listReserveStaff,
-  pageSearchElderByKey
-} from "@/apis/bookManage";
 import { getServiceById, getServiceType, IChargeMethodList } from "@/apis/service";
 
 const ruleFormRef = ref<FormInstance | null>(null);
@@ -199,7 +188,7 @@ const handleSubmit = () => {
         });
       }
     } catch (error) {
-      console.log(error);
+      handleRequestFailure(error);
     }
   });
 };

@@ -8,6 +8,7 @@ import com.shanzhu.beadhouse.entity.vo.GetReserveByReserveIdAndElderIdVo;
 import com.shanzhu.beadhouse.entity.vo.PageReserveByKeyVo;
 import com.shanzhu.beadhouse.entity.vo.ExpireReserveVo;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 
 import java.util.Date;
 import java.util.List;
@@ -21,13 +22,22 @@ import java.util.List;
  * @date: 2024-08-10
  */
 public interface ReserveMapper extends BaseMapper<Reserve> {
+    @Select("SELECT * FROM reserve WHERE id=#{id} FOR UPDATE")
+    Reserve selectByIdForUpdate(@Param("id") Long id);
+
+    @Select("SELECT * FROM reserve WHERE active_elder_id=#{elderId} FOR UPDATE")
+    Reserve selectActiveByElderForUpdate(@Param("elderId") Long elderId);
+
+    @Select("SELECT id FROM reserve WHERE state='ACTIVE' AND due_date < #{today} ORDER BY id")
+    List<Long> listExpiredActiveIds(@Param("today") Date today);
+
     /**
      * 根据搜索关键字查询预定信息
      *
      * @param keyQuery
      * @return
      */
-    List<PageReserveByKeyVo> listReserveByKey(@Param("keyQuery") PageReserveByKeyQuery keyQuery);
+    List<PageReserveByKeyVo> listReserveByKey(@Param("keyQuery") PageReserveByKeyQuery keyQuery, @Param("scopeStaffId") Long scopeStaffId);
 
     /**
      * 根据预定编号和老人编号获取预定信息

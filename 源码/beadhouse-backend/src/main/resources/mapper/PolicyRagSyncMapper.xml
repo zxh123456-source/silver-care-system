@@ -1,46 +1,58 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.shanzhu.beadhouse.dao.mapper.PolicyRagSyncMapper">
-    <insert id="upsertDesired">
-        INSERT INTO policy_rag_sync
-            (document_key, title, source, desired_action, revision, status,
-             attempt_count, next_retry_time, create_id, create_time, update_id, update_time)
-        VALUES
-            (#{documentKey}, #{title}, #{source}, #{desiredAction}, #{revision}, 'PENDING',
-             0, NOW(), 1, NOW(), 1, NOW())
-        ON DUPLICATE KEY UPDATE
-            title = VALUES(title),
-            source = VALUES(source),
-            desired_action = VALUES(desired_action),
-            revision = VALUES(revision),
-            status = 'PENDING',
-            attempt_count = 0,
-            next_retry_time = NOW(),
-            last_error_code = NULL,
-            update_time = NOW()
+    <insert id="initialize">
+        INSERT INTO policy_rag_sync(document_key,title,source,desired_action,desired_version,status,
+          create_id,create_time,update_id,update_time)
+        VALUES(#{key},#{title},#{source},'DELETE',0,'PENDING',#{actor},NOW(),#{actor},NOW())
+        ON DUPLICATE KEY UPDATE id=id
     </insert>
-    <select id="listDue" resultType="com.shanzhu.beadhouse.entity.po.PolicyRagSync">
-        SELECT * FROM policy_rag_sync
-        WHERE status IN ('PENDING', 'FAILED') AND next_retry_time &lt;= NOW()
-        ORDER BY next_retry_time ASC, id ASC
-        LIMIT #{limit}
+    <select id="lockDocument" resultType="com.shanzhu.beadhouse.entity.po.PolicyRagSync" flushCache="true">
+        SELECT * FROM policy_rag_sync WHERE document_key=#{key} FOR UPDATE
+    </select>
+    <sql id="due">
+        ((status IN ('PENDING','FAILED') AND next_retry_time &lt;= NOW(3))
+          OR (status='PROCESSING' AND (lease_until IS NULL OR lease_until &lt;= NOW(3))))
+    </sql>
+    <select id="lockDue" resultType="com.shanzhu.beadhouse.entity.po.PolicyRagSync" flushCache="true">
+        SELECT * FROM policy_rag_sync WHERE <include refid="due"/>
+        <if test="key != null">AND document_key=#{key}</if>
+        ORDER BY next_retry_time,id LIMIT 1 FOR UPDATE SKIP LOCKED
+    </select>
+    <update id="stage">
+        UPDATE policy_rag_sync SET title=#{row.title},source=#{row.source},desired_action=#{row.desiredAction},
+          desired_version=#{row.desiredVersion},revision=#{row.revision},payload_json=#{row.payloadJson},status='PENDING',
+          attempt_count=0,next_retry_time=NOW(),last_error_code=NULL,lease_owner=NULL,lease_until=NULL,
+          lease_token=lease_token+1,update_id=#{actor},update_time=NOW()
+        WHERE id=#{row.id} AND desired_version=#{previousVersion}
+    </update>
+    <update id="claim">
+        UPDATE policy_rag_sync SET status='PROCESSING',lease_owner=#{owner},lease_token=lease_token+1,
+          lease_until=TIMESTAMPADD(SECOND,#{seconds},NOW(3)),update_id=0,update_time=NOW()
+        WHERE id=#{id} AND <include refid="due"/>
+    </update>
+    <sql id="claimIdentity">
+        id=#{claim.id} AND document_key=#{claim.documentKey} AND desired_version=#{claim.desiredVersion}
+        AND desired_action=#{claim.desiredAction} AND revision=#{claim.revision} AND status='PROCESSING'
+        AND lease_owner=#{claim.leaseOwner} AND lease_token=#{claim.leaseToken} AND lease_until &gt; NOW(3)
+    </sql>
+    <select id="validClaim" resultType="int" flushCache="true">
+        SELECT COUNT(*) FROM policy_rag_sync WHERE <include refid="claimIdentity"/>
     </select>
     <update id="markSynced">
-        UPDATE policy_rag_sync
-        SET status = 'SYNCED', last_error_code = NULL, update_time = NOW()
-        WHERE document_key = #{documentKey}
-          AND desired_action = #{desiredAction}
-          AND ((revision = #{revision}) OR (revision IS NULL AND #{revision} IS NULL))
+        UPDATE policy_rag_sync SET status='SYNCED',last_error_code=NULL,lease_owner=NULL,lease_until=NULL,
+          update_id=0,update_time=NOW() WHERE <include refid="claimIdentity"/>
     </update>
     <update id="markFailed">
-        UPDATE policy_rag_sync
-        SET status = 'FAILED',
-            attempt_count = attempt_count + 1,
-            next_retry_time = DATE_ADD(NOW(), INTERVAL LEAST(300, POW(2, attempt_count + 1)) SECOND),
-            last_error_code = #{errorCode},
-            update_time = NOW()
-        WHERE document_key = #{documentKey}
-          AND desired_action = #{desiredAction}
-          AND ((revision = #{revision}) OR (revision IS NULL AND #{revision} IS NULL))
+        UPDATE policy_rag_sync SET status='FAILED',attempt_count=attempt_count+1,
+          next_retry_time=TIMESTAMPADD(SECOND,LEAST(300,POW(2,attempt_count+1)),NOW(3)),
+          last_error_code=#{errorCode},lease_owner=NULL,lease_until=NULL,update_id=0,update_time=NOW()
+        WHERE <include refid="claimIdentity"/>
     </update>
+    <!-- 0 denotes the system process, never an existing staff account. -->
+    <insert id="systemAudit">
+        INSERT INTO ai_audit_log(module,action,object_type,object_id,operator_id,operator_name,detail,
+          create_id,create_time,update_id,update_time)
+        VALUES('制度知识库','后台同步混合检索索引','policy_rag_sync',#{id},NULL,'系统',#{detail},0,NOW(),0,NOW())
+    </insert>
 </mapper>

@@ -55,16 +55,16 @@
 </template>
 
 <script lang="ts" setup>
+import { handleRequestFailure } from "@/utils/requestFailure";
 import { reactive, ref, watch } from "vue";
 import { ElMessage, FormInstance, FormRules } from "element-plus";
-import { integerRule, numberRule, stringRule } from "@/utils/formRules";
-import { getRoomTypeById } from "@/apis/roomType";
-import { getBuildingById, getFloorById } from "@/apis/build";
+import { integerRule, stringRule } from "@/utils/formRules";
+import { getFloorById } from "@/apis/build";
 
 const ruleFormRef = ref<FormInstance | null>(null);
 const dialogVisible = ref(false);
 
-watch(dialogVisible, (value, oldValue, onCleanup) => {
+watch(dialogVisible, value => {
   if (!value) {
     formData.value = {
       id: "",
@@ -151,7 +151,7 @@ const handleSubmit = () => {
         });
       }
     } catch (error) {
-      console.log(error);
+      handleRequestFailure(error);
     }
   });
 };

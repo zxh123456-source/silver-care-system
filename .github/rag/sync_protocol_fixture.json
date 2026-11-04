@@ -1,0 +1,28 @@
+{
+  "requests": [
+    {
+      "document_key": "protocol-fixture",
+      "version": 42,
+      "action": "UPSERT",
+      "title": "制度 \"协作\"",
+      "source": "护理部/日常",
+      "chunks": [
+        {
+          "chunk_id": 9007199254740993,
+          "section_no": 1,
+          "content": "每天晨间核对😊\n第二行\t记录"
+        }
+      ],
+      "payload_hash": "d76cdfa982fa3a9ddf755ba2a709b60811fd25f16e3681d2482b480d4a2f3b61"
+    },
+    {
+      "document_key": "protocol-fixture",
+      "version": 43,
+      "action": "DELETE",
+      "title": "制度 \"协作\"",
+      "source": "护理部/日常",
+      "chunks": [],
+      "payload_hash": "c352b00bb08799bdc0ca19abe56a26978214caff3072a9576d9b3db63c42c7f8"
+    }
+  ]
+}

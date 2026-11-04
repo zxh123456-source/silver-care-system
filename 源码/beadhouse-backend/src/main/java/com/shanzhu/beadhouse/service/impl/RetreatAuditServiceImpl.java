@@ -20,8 +20,11 @@ import com.shanzhu.beadhouse.service.common.CateringSetFunc;
 import com.shanzhu.beadhouse.service.common.ContractFunc;
 import com.shanzhu.beadhouse.service.common.NurseGradeFunc;
 import com.shanzhu.beadhouse.service.common.RetreatAuditFunc;
+import com.shanzhu.beadhouse.service.common.BedLifecycleSupport;
+import com.shanzhu.beadhouse.common.config.exception.BusinessRuntimeException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Isolation;
 
 import javax.annotation.Resource;
 import java.math.BigDecimal;
@@ -32,6 +35,9 @@ import java.util.Objects;
 
 @Service
 public class RetreatAuditServiceImpl implements RetreatAuditService {
+    @Resource private BedLifecycleSupport bedLifecycle;
+    @Resource
+    private com.shanzhu.beadhouse.service.common.AiDataScopeService dataScopeService;
     @Resource
     private ElderMapper elderMapper;
     @Resource
@@ -54,7 +60,7 @@ public class RetreatAuditServiceImpl implements RetreatAuditService {
     @Override
     public Result pageRetreatAuditByKey(PageRetreatAuditQuery query) {
         // 根据搜索关键字查询退住申请信息
-        List<PageRetreatByKeyVo> pageRetreatByKeyVoList = retreatApplyMapper.listRetreatAuditByKey(query);
+        List<PageRetreatByKeyVo> pageRetreatByKeyVoList = retreatApplyMapper.listRetreatAuditByKey(query, dataScopeService.queryStaffId());
         // 封装返回数据
         PageResult<PageRetreatByKeyVo> pageResult = pageUtil.packPageResultData(pageRetreatByKeyVoList, query.getPageNum(), query.getPageSize());
         return Result.success(pageResult);
@@ -62,6 +68,7 @@ public class RetreatAuditServiceImpl implements RetreatAuditService {
 
     @Override
     public Result getElderFeeById(Long elderId) {
+        dataScopeService.assertElderAccess(elderId);
         // 根据编号获取老人
         Elder elder = elderMapper.selectById(elderId);
         // 验证老人是否存在
@@ -269,24 +276,40 @@ public class RetreatAuditServiceImpl implements RetreatAuditService {
     }
 
     @Override
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Result auditElderFee(AuditElderFeeQuery query) {
+        dataScopeService.assertElderAccess(query.getElderId());
+        AssertUtil.notNull(query.getApplyId(), ExceptionEnum.DATA_NOT_EXIST);
+        RetreatApply storedApplication = retreatApplyMapper.selectById(query.getApplyId());
+        AssertUtil.notNull(storedApplication, ExceptionEnum.DATA_NOT_EXIST);
+        AssertUtil.isTrue(Objects.equals(storedApplication.getElderId(), query.getElderId()), ExceptionEnum.AUTH_ERROR);
         // 验证审核结果是否合法
         boolean checkAuditResult = !Objects.equals(query.getAuditResult(), AuditEnum.PASS.getStatus()) &&
                 !Objects.equals(query.getAuditResult(), AuditEnum.NO_PASS.getStatus());
         AssertUtil.notTrue(checkAuditResult, ExceptionEnum.AUDIT_RESULT_ERROR);
-        // 根据编号获取老人
-        Elder elder = elderMapper.selectById(query.getElderId());
-        // 验证老人是否存在
-        AssertUtil.notNull(elder, ExceptionEnum.DATA_NOT_EXIST);
-        // 验证老人是否为退住审核状态
-        AssertUtil.isTrue(Objects.equals(elder.getCheckFlag(), CheckEnum.EXIT_AUDIT.getStatus()), ExceptionEnum.ELDER_NOT_EXIT_AUDIT);
-        // 验证审核是否通过
+        Elder elder = bedLifecycle.lockElder(query.getElderId());
+        dataScopeService.assertElderAccess(elder.getId());
+        java.util.Map<Long, Bed> beds = bedLifecycle.lockBeds(elder.getBedId());
+        storedApplication = retreatApplyMapper.selectByIdForUpdate(query.getApplyId());
+        AssertUtil.notNull(storedApplication, ExceptionEnum.DATA_NOT_EXIST);
+        AssertUtil.isTrue(Objects.equals(storedApplication.getElderId(), elder.getId()), ExceptionEnum.AUTH_ERROR);
         boolean passFlag = Objects.equals(query.getAuditResult(), AuditEnum.PASS.getStatus());
+        String finalState = passFlag ? AuditEnum.HAVE_PASS.getStatus() : AuditEnum.NOT_PASS.getStatus();
+        // A finished application is an immutable receipt, including during a later admission cycle.
+        if (!Objects.equals(storedApplication.getApplyFlag(), AuditEnum.STAY_AUDIT.getStatus())) {
+            if (Objects.equals(storedApplication.getApplyFlag(), finalState)) return Result.success();
+            throw new BusinessRuntimeException(409, "退住申请已审核，不能更改审核结果");
+        }
+        bedLifecycle.assertState(elder, CheckEnum.EXIT_AUDIT.getStatus());
+        Bed bed = bedLifecycle.requireBed(beds, elder.getBedId());
+        bedLifecycle.assertBedState(bed, BedEnum.EXIT_AUDIT.getStatus());
+        RetreatApply pending = retreatApplyMapper.selectPendingForUpdate(elder.getId());
+        if (pending == null || !Objects.equals(pending.getId(), storedApplication.getId()))
+            throw new BusinessRuntimeException(409, "退住申请已不属于当前审核流程");
         // 封装申请修改
         RetreatApply retreatApply = new RetreatApply();
         retreatApply.setId(query.getApplyId());
-        retreatApply.setApplyFlag(passFlag ? AuditEnum.HAVE_PASS.getStatus() : AuditEnum.NOT_PASS.getStatus());
+        retreatApply.setApplyFlag(finalState);
         // 修改
         retreatApplyMapper.updateById(retreatApply);
         // 若通过
@@ -300,12 +323,7 @@ public class RetreatAuditServiceImpl implements RetreatAuditService {
             // 修改
             elderMapper.updateById(elder);
         }
-        // 封装床位修改
-        Bed bed = new Bed();
-        bed.setId(elder.getBedId());
-        bed.setBedFlag(passFlag ? BedEnum.IDLE.getStatus() : BedEnum.ENTER.getStatus());
-        // 修改
-        bedMapper.updateById(bed);
+        bedLifecycle.setBedState(bed, passFlag ? BedEnum.IDLE.getStatus() : BedEnum.ENTER.getStatus());
         return Result.success();
     }
 }

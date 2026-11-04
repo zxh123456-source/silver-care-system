@@ -29,7 +29,8 @@ public interface OutwardMapper extends BaseMapper<Outward> {
      */
     List<PageOutwardByKeyVo> listOutwardByKey(@Param("keyQuery") PageOutwardByKeyQuery keyQuery,
                                               @Param("startTime") Date startTime,
-                                              @Param("endTime") Date endTime);
+                                              @Param("endTime") Date endTime,
+                                              @Param("scopeStaffId") Long scopeStaffId);
 
     /**
      * 根据编号获取外出登记

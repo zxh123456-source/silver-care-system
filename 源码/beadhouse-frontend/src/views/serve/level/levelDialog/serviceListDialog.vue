@@ -27,7 +27,6 @@
 
 <script lang="ts" setup>
 import { reactive, ref } from "vue";
-import { Plus } from "@element-plus/icons-vue";
 import { ColumnProps } from "@/components/ProTable/interface";
 import { pageServiceByKey } from "@/apis/nurseGrade";
 
@@ -35,7 +34,7 @@ const dialogVisible = ref(false);
 // 获取 ProTable 元素，调用其获取刷新数据方法（还能获取到当前查询参数，方便导出携带参数）
 const proTable = ref();
 const initParam = reactive({});
-const serviceList = ref<any>([]);
+const serviceList = ref<any[]>([]);
 
 // 获取选择的数据
 const operateService = (selection: any) => {
@@ -44,10 +43,10 @@ const operateService = (selection: any) => {
 
 // 确认数据
 const emit = defineEmits<{
-  (event: "addService", val: any): void
+  (event: "addService", val: any[]): void
 }>();
 const confirmData = () => {
-  emit("addService", serviceList);
+  emit("addService", serviceList.value);
   dialogVisible.value = false;
 };
 
@@ -77,14 +76,6 @@ const columns: ColumnProps<any>[] = [
   { prop: "price", label: "服务费用（元）" },
   { prop: "needDate", label: "服务时长（min）" }
 ];
-
-interface DialogProps {
-  isView: boolean;
-}
-
-const drawerProps = ref<DialogProps>({
-  isView: false
-});
 
 // 父组件须调用子组件的方法
 const acceptParams = async () => {

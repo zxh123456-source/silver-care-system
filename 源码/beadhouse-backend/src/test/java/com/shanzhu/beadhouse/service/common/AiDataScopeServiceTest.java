@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.shanzhu.beadhouse.common.config.exception.BusinessRuntimeException;
 import com.shanzhu.beadhouse.common.config.security.handler.AuthorityAssert;
 import com.shanzhu.beadhouse.dao.mapper.ElderStaffAssignmentMapper;
+import com.shanzhu.beadhouse.dao.mapper.ElderMapper;
+import java.util.Collections;
 import com.shanzhu.beadhouse.dao.mapper.StaffMapper;
 import com.shanzhu.beadhouse.entity.vo.LoginUserVo;
 import org.junit.jupiter.api.BeforeEach;
@@ -15,6 +17,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
@@ -23,6 +26,7 @@ import static org.mockito.Mockito.when;
 class AiDataScopeServiceTest {
     @Mock private AuthorityAssert authorityAssert;
     @Mock private ElderStaffAssignmentMapper assignmentMapper;
+    @Mock private ElderMapper elderMapper;
     @Mock private StaffMapper staffMapper;
     @InjectMocks private AiDataScopeService service;
 
@@ -36,7 +40,7 @@ class AiDataScopeServiceTest {
         LoginUserVo user = new LoginUserVo(); user.setId(4L); user.setRoleId(5L);
         when(authorityAssert.getLoginUserInfo()).thenReturn(user);
         when(authorityAssert.getLoginUserId()).thenReturn(4L);
-        when(assignmentMapper.selectCount(any(Wrapper.class))).thenReturn(0L);
+        when(elderMapper.listAccessibleElderIds(org.mockito.ArgumentMatchers.eq(4L), any())).thenReturn(Collections.emptyList());
 
         assertThatThrownBy(() -> service.assertElderAccess(17L))
                 .isInstanceOf(BusinessRuntimeException.class)
@@ -49,5 +53,22 @@ class AiDataScopeServiceTest {
         when(authorityAssert.getLoginUserInfo()).thenReturn(user);
 
         assertThatCode(() -> service.assertElderAccess(17L)).doesNotThrowAnyException();
+    }
+
+    @Test
+    void queryScopeUsesServerIdentityAndAdminAloneGetsUnrestrictedScope() {
+        LoginUserVo user = new LoginUserVo(); user.setId(4L); user.setRoleId(5L);
+        when(authorityAssert.getLoginUserInfo()).thenReturn(user);
+        when(authorityAssert.getLoginUserId()).thenReturn(4L);
+        assertThat(service.queryStaffId()).isEqualTo(4L);
+        user.setRoleId(1L);
+        assertThat(service.queryStaffId()).isNull();
+    }
+
+    @Test
+    void anonymousQueriesAndRecordReadsAreRejected() {
+        when(authorityAssert.getLoginUserInfo()).thenReturn(null);
+        assertThatThrownBy(() -> service.queryStaffId()).isInstanceOf(BusinessRuntimeException.class);
+        assertThatThrownBy(() -> service.assertElderAccess(17L)).isInstanceOf(BusinessRuntimeException.class);
     }
 }
