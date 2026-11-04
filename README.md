@@ -70,6 +70,28 @@ $backupResult = ./备份数据库.ps1 -WritersStopped | ConvertFrom-Json
 
 可执行验收：`python -m unittest discover -s tools -p test_database.py`，以及 `python .github/database/check.py --disposable-test`；后者只创建并操作自有隔离容器，覆盖新旧库、重复、漂移、争锁、故障/中断、备份恢复与篡改拒绝。
 
+## 整套系统加密备份与隔离恢复
+
+数据库备份之外，整套包还保存上传文件、附件元数据/历史引用、项目配置及存在的RAG JSON。使用独立工具环境安装`tools/requirements-system-backup.txt`，避免改变AI运行环境：
+
+```powershell
+python -m venv .runtime/system-tools-venv
+./.runtime/system-tools-venv/Scripts/python.exe -m pip install -r tools/requirements-system-backup.txt
+New-Item -ItemType Directory -Force .runtime/backups, .runtime/backup-keys
+# 先停止应用写入；MySQL须仍运行。下面容器名/目录按实际实例填写。
+./.runtime/system-tools-venv/Scripts/python.exe tools/system_backup.py create --container <MySQL容器> --project-root . --uploads-root <实际上传根目录> --rag-file <RAG状态JSON路径> --output .runtime/backups/system.scb --key-file .runtime/backup-keys/system.key --writers-stopped
+./.runtime/system-tools-venv/Scripts/python.exe tools/system_backup.py verify --package .runtime/backups/system.scb --key-file .runtime/backup-keys/system.key
+./.runtime/system-tools-venv/Scripts/python.exe tools/system_backup.py restore-drill --package .runtime/backups/system.scb --key-file .runtime/backup-keys/system.key
+```
+
+输出和密钥均独占创建，不覆盖旧文件。AES256-GCM流式认证加密保护完整包，密钥独立离线保管、不要随包或Git提交。包内包含配置秘密；日志/命令参数不输出密钥内容。默认上限为总16GiB、单文件8GiB、10万文件、JSON/ZIP目录32MiB，使用无压缩ZIP。认证、路径/链接、文件大小及完整哈希校验均在创建恢复目标前完成。失败可能留下无效部分输出，只能以`verify`通过为准。
+
+`--writers-stopped`是操作者对所有写入方的确认；工具另拒绝已登记仍运行的应用，并比较前后数据库/文件快照，但不能替操作者停止未登记外部写入。所有活附件或活引用所需文件必须存在；失效状态或孤儿历史引用拒绝打包，不能生成恢复端无法接受的成功包。已删除且无活引用的缺失文件仅保留元数据，不声称恢复原本不存在的字节。附件路径重定位只改`path`，保留原身份/URL/历史引用；当前数据库路径上限225字符，超长时选择更短的恢复工作父目录。
+
+`restore-drill`仅创建工具自己的新MySQL/目录，验证后清理，不接管日常目标。结果`RESTORED_REBUILD_REQUIRED`表示数据库/附件恢复已核对，索引尚待重建：MySQL的版本快照和DELETE墓碑为权威，生成独立新JSON/新Milvus集合，随后由应用`POST /ai/policy/reindex`递增版本并同步；不得拿旧JSON/旧集合降低墓碑版本。Redis登录会话不恢复，原会话应失效。正式切换环境需按已验证备份和新目标配置执行，不把隔离演练当成生产上线。
+
+完整可执行验收：`python -m unittest discover -s tools -p "test_system*.py" -v`；安装AI依赖、准备JDK8/已构建后端和Docker后执行`python .github/system_backup/check.py --disposable-test`。可用`--rag-python`指定独立AI解释器、`--model-cache`复用BGE缓存。该验收实际上传/绑定附件、生成及删除制度、备份恢复、事务回滚、新索引重建与鉴权读取，并检查源未改变/本次资源清理；不使用日常库。CI新增独立系统恢复门禁，只上传脱敏summary/JUnit，绝不上传包、key或private目录。
+
 ## 安全约定
 
 启动脚本会读取根目录 `.env`，然后读取可选 `本地配置.ps1`（后者优先），并检查必填密钥。直接使用 IDE 启动 Java/Python 时，需要把相同环境变量配置到运行配置中；Spring 本身不会读取根目录 `.env`。JWT 至少32字节；Spring 的 `AI_RAG_INTERNAL_TOKEN` 必须与 Python 的 `RAG_INTERNAL_TOKEN` 一致。`RAG_MILVUS_TOKEN` 默认为启动脚本拼接的 `root:<MILVUS_ROOT_PASSWORD>`，代码中不提供默认密码。

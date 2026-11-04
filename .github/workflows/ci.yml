@@ -315,6 +315,86 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  system-recovery:
+    name: System / encrypted backup + recovery
+    needs: [backend]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      TZ: Asia/Shanghai
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6
+        with:
+          distribution: temurin
+          java-version: '8'
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            tools/requirements-system-backup.txt
+            源码/beadhouse-ai/requirements*.txt
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
+        with:
+          name: backend-app
+          path: 源码/beadhouse-backend/target/
+      - name: Install backup and real retrieval dependencies
+        run: python -m pip install -r tools/requirements-system-backup.txt -r 源码/beadhouse-ai/requirements.txt
+      - name: Verify authenticated package and owned restore boundaries
+        run: python -m unittest discover -s tools -p 'test_system*.py' -v
+      - name: Build the isolated object storage image
+        run: docker build -t silver-care-minio:RELEASE.2024-12-18T13-15-44Z docker/minio
+      - name: Restore synthetic database, authenticated attachments and real BGE index
+        run: python .github/system_backup/check.py --disposable-test
+      - name: Require complete system recovery evidence
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          reports = list(Path('.runtime/roadmap2-system-drill').glob('*/summary.json'))
+          assert len(reports) == 1, 'Expected exactly one recovery run'
+          report = json.loads(reports[0].read_text())
+          assert report['status'] == 'verified' and not report['cleanupErrors']
+          required = {
+              'missing active attachment prevents publication',
+              'wrong key and modified ciphertext rejected before any restore container creation',
+              'real MySQL CAS mismatch rolls back prior attachment relocation',
+              'application reindex advances versions, synchronizes tombstones and confirms actual BGE ONNX with fresh Milvus',
+              'restored attachment HTTP bytes match; anonymous and unauthorized sessions denied',
+              'restore context removed its owned database and plaintext recovery workspace',
+              'complete recovery and target requests leave source data and uploads unchanged',
+          }
+          assert required.issubset(report['checks']), 'Required recovery scenarios were not executed'
+          evidence = report['metadata']
+          assert evidence['sourceChecksumBefore'] == evidence['sourceChecksumAfter']
+          assert evidence['ownedContainersRemoved'] and evidence['ownedProcessesStopped']
+          assert evidence['attachment']['authenticated'] == 200
+          assert evidence['attachment']['anonymous'] == 401
+          assert evidence['attachment']['unauthorized'] == 403
+          assert evidence['attachment']['sourceSession'] == 401
+          assert evidence['retrieval']['backend'] == 'milvus-hybrid'
+          assert evidence['retrieval']['liveCitations'] > 0 and evidence['retrieval']['deletedCitations'] == 0
+          assert evidence['retrieval']['fallback'] is None
+          assert {row['action'] for row in evidence['versions']} == {'UPSERT', 'DELETE'}
+          assert all(row['status'] == 'SYNCED' and row['restoredVersion'] > row['archivedVersion']
+                     for row in evidence['versions'])
+          PY
+      - name: Upload safe system recovery evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: system-recovery-evidence
+          path: |
+            .runtime/roadmap2-system-drill/**/summary.json
+            .runtime/roadmap2-system-drill/**/junit.xml
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
+
   python:
     name: Python / dependencies + tests
     runs-on: ubuntu-24.04

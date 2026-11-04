@@ -5,6 +5,7 @@ No restore target can be supplied: every drill creates its own container, withou
 host mounts or published ports. Docker context / DOCKER_HOST are respected.
 """
 import argparse
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -332,7 +333,21 @@ def remove_owned(docker, container, token):
     docker.run(["rm", "-f", "-v", container], timeout=60)
 
 
-def restore_drill(folder, keep_on_failure=False):
+class RestoredDatabase:
+    """Short-lived owned database; credentials are deliberately absent from repr/logs."""
+
+    def __init__(self, docker, container, password, port, result):
+        self.docker, self.container, self.password = docker, container, password
+        self.host, self.port, self.result = "127.0.0.1", port, result
+
+
+@contextmanager
+def owned_restored_database(folder, *, publish_localhost=False, keep_on_failure=False):
+    """Internal lifecycle for an owned restore; no caller-supplied target is accepted.
+
+    Only the system recovery callback needs a random loopback port. The original
+    CLI always uses network=none with no ports, volumes or source mounts.
+    """
     folder = Path(folder).absolute()
     manifest = load_backup(folder)  # Fail before Docker or container creation.
     token = uuid.uuid4().hex
@@ -343,6 +358,7 @@ def restore_drill(folder, keep_on_failure=False):
     verified = False
     result = None
     failure = None
+    password = None
     try:
         # Stage an immutable private copy before creation; importing this copy avoids
         # using a user-edited backup after the initial validation.
@@ -352,9 +368,10 @@ def restore_drill(folder, keep_on_failure=False):
                 shutil.copyfile(folder / filename, staged / filename)
             require(load_backup(staged) == manifest, "Backup changed during validation")
             environment = dict(os.environ)
-            environment["MYSQL_ROOT_PASSWORD"] = secrets.token_urlsafe(36)
+            password = environment["MYSQL_ROOT_PASSWORD"] = secrets.token_urlsafe(36)
             # -e NAME obtains the value from the process environment, not command arguments.
-            created = docker.run(["run", "--detach", "--name", name, "--network", "none",
+            network = ["--publish", "127.0.0.1::3306"] if publish_localhost else ["--network", "none"]
+            created = docker.run(["run", "--detach", "--name", name, *network,
                                   "--label", f"{OWNER_LABEL}={token}",
                                   "--env", "MYSQL_ROOT_PASSWORD", IMAGE,
                                   "--event-scheduler=OFF", "--local-infile=OFF",
@@ -381,6 +398,14 @@ def restore_drill(folder, keep_on_failure=False):
                         '< /tmp/silvercare-restore.sql'], timeout=1200)
             result = verify_restored(docker, container, manifest)
             result["log"] = str(log_dir)
+            port = None
+            if publish_localhost:
+                binding = docker.run(["port", container, "3306/tcp"]).stdout.decode("ascii").strip()
+                match = re.fullmatch(r"127\.0\.0\.1:([0-9]+)", binding)
+                require(match is not None and 1 <= int(match[1]) <= 65535,
+                        "Restore database is not exclusively published on loopback")
+                port = int(match[1])
+            yield RestoredDatabase(docker, container, password, port, result)
             verified = True
     except BaseException as error:
         failure = error
@@ -408,12 +433,22 @@ def restore_drill(folder, keep_on_failure=False):
             else:
                 failure = DatabaseError(f"{failure}; retained isolated container {container} ({name})")
     if failure:
+        # A callback can raise arbitrary text including its own application secrets.
+        # Keep diagnostics structural instead of persisting that text.
         (log_dir / "result.json").write_text(json.dumps(
-            {"status": "failed", "error": str(failure), "container": container}), encoding="utf-8")
+            {"status": "failed", "error_type": type(failure).__name__, "container": container}), encoding="utf-8")
         if isinstance(failure, KeyboardInterrupt):
             raise failure
-        raise DatabaseError(f"{failure}; log: {log_dir}") from failure
+        detail = str(failure) if isinstance(failure, DatabaseError) else type(failure).__name__
+        if password:
+            detail = detail.replace(password, "[redacted]")
+        raise DatabaseError(f"{detail}; log: {log_dir}") from None
     (log_dir / "result.json").write_text(json.dumps(result), encoding="utf-8")
+
+
+def restore_drill(folder, keep_on_failure=False):
+    with owned_restored_database(folder, keep_on_failure=keep_on_failure) as restored:
+        result = restored.result
     return result
 
 
